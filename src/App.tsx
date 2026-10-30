@@ -1,7 +1,7 @@
 /**
- * AI Triage Assistant — Primary Health Centre Clinical Decision Support
+ * XOR Triage — Primary Health Centre Clinical Decision Support
  * Target Setting: Primary Health Centres (PHCs), Sub-Centres & CHCs in Rural India
- * Protocol: IN-PHC-TRIAGE-v2.4-DEMO
+ * Protocol: IN-PHC-TRIAGE-v2.4-DEMO (Two-Level Priority: EMERGENCY | ROUTINE)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -13,7 +13,8 @@ import {
   StaffProfile,
   CareStatus,
   ClinicalPriority,
-  VitalSigns
+  VitalSigns,
+  ReceiptPrintStatus
 } from './types/triage';
 
 import { repository } from './services/patientRepository';
@@ -25,6 +26,8 @@ import { RegistrationView } from './components/RegistrationView';
 import { PatientDetailView } from './components/PatientDetailView';
 import { SyncCenterView } from './components/SyncCenterView';
 import { RedFlagAlertModal } from './components/RedFlagAlertModal';
+import { AssessmentSummaryView } from './components/AssessmentSummaryView';
+import { PatientReceiptModal } from './components/PatientReceiptModal';
 import { evaluateTriage } from './services/triageEngine';
 import { I18nProvider, useI18n } from './i18n';
 
@@ -33,9 +36,11 @@ function AppShell() {
   const [isReady, setIsReady] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('queue');
 
-  // Staff and Connectivity
+  // Staff and Connectivity (real browser online/offline detection + manual offline simulation)
   const [currentStaff, setCurrentStaff] = useState<StaffProfile>(INITIAL_STAFF_MEMBERS[0]);
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
 
   // Core Data Collections
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -47,11 +52,24 @@ function AppShell() {
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [selectedEncounterId, setSelectedEncounterId] = useState<string | null>(null);
 
+  // Post-Registration Assessment Summary state (Print Receipt, View Details, Return to Queue)
+  const [postRegistrationSummary, setPostRegistrationSummary] = useState<{
+    patientId: string;
+    encounterId: string;
+  } | null>(null);
+
+  // Active Printable Receipt Preview Modal target
+  const [activeReceiptTarget, setActiveReceiptTarget] = useState<{
+    patientId: string;
+    encounterId: string;
+  } | null>(null);
+
   // Red-Flag Emergency Modal state
   const [pendingEmergencyModal, setPendingEmergencyModal] = useState<{
     patient: Patient;
     assessment: TriageAssessment;
     encounterId: string;
+    fromRegistration?: boolean;
   } | null>(null);
 
   // Refresh reactive state from repository
@@ -73,17 +91,62 @@ function AppShell() {
     init();
   }, [refreshState]);
 
-  // Handle Online / Offline toggle
-  const handleToggleOnline = () => {
-    setIsOnline(prev => !prev);
+  // Listen to browser online / offline events and automatically reconcile local records when connectivity returns
+  useEffect(() => {
+    const handleBrowserOnline = async () => {
+      setIsOnline(true);
+      await repository.syncPendingEncounters();
+      refreshState();
+    };
+
+    const handleBrowserOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleBrowserOnline);
+    window.addEventListener('offline', handleBrowserOffline);
+    return () => {
+      window.removeEventListener('online', handleBrowserOnline);
+      window.removeEventListener('offline', handleBrowserOffline);
+    };
+  }, [refreshState]);
+
+  // Handle Online / Offline toggle (reconciles pending records when restored to Online)
+  const handleToggleOnline = async () => {
+    const nextOnline = !isOnline;
+    setIsOnline(nextOnline);
+    if (nextOnline) {
+      await repository.syncPendingEncounters();
+      refreshState();
+    }
   };
 
   // Select patient to view details
   const handleSelectPatient = (patientId: string, encounterId: string) => {
+    setPostRegistrationSummary(null);
     setSelectedPatientId(patientId);
     setSelectedEncounterId(encounterId);
     setActiveTab('queue');
   };
+
+  // Open Receipt Preview modal for any patient encounter
+  const handleOpenReceipt = (patientId: string, encounterId: string) => {
+    setActiveReceiptTarget({ patientId, encounterId });
+  };
+
+  // Update Receipt Print Status in IndexedDB
+  const handleUpdateReceiptPrintStatus = useCallback(
+    async (encounterId: string, status: ReceiptPrintStatus) => {
+      await repository.updateReceiptPrintStatus(
+        encounterId,
+        status,
+        currentStaff.name,
+        currentStaff.role
+      );
+      refreshState();
+    },
+    [currentStaff.name, currentStaff.role, refreshState]
+  );
 
   // Handle new patient registration submission
   const handleSaveRegistration = async (
@@ -99,22 +162,27 @@ function AppShell() {
       actor: currentStaff.name,
       actorRole: currentStaff.role,
       action: 'Patient Registered & Triaged',
-      details: `New patient registered. Initial CDS Priority: ${assessment.priority}. Findings: ${assessment.explanation[0] || 'Standard intake.'}`
+      details: `New patient registered (${encounter.receiptId}). Priority: ${assessment.priority} (${assessment.assessmentStatus}). Findings: ${assessment.explanation[0] || 'Standard intake.'}`
     };
 
     await repository.addPatientWithEncounter(patient, encounter, assessment, auditEvent);
     refreshState();
 
     if (assessment.priority === 'EMERGENCY') {
-      // Trigger mandatory emergency red-flag modal
+      // Trigger mandatory emergency red-flag modal first, then show Assessment Summary
       setPendingEmergencyModal({
         patient,
         assessment,
-        encounterId: encounter.id
+        encounterId: encounter.id,
+        fromRegistration: true
       });
     } else {
-      setSelectedPatientId(patient.id);
-      setSelectedEncounterId(encounter.id);
+      setSelectedPatientId(null);
+      setSelectedEncounterId(null);
+      setPostRegistrationSummary({
+        patientId: patient.id,
+        encounterId: encounter.id
+      });
     }
   };
 
@@ -133,9 +201,17 @@ function AppShell() {
     refreshState();
     const pid = pendingEmergencyModal.patient.id;
     const eid = pendingEmergencyModal.encounterId;
+    const wasFromRegistration = pendingEmergencyModal.fromRegistration;
     setPendingEmergencyModal(null);
-    setSelectedPatientId(pid);
-    setSelectedEncounterId(eid);
+
+    if (wasFromRegistration) {
+      setSelectedPatientId(null);
+      setSelectedEncounterId(null);
+      setPostRegistrationSummary({ patientId: pid, encounterId: eid });
+    } else {
+      setSelectedPatientId(pid);
+      setSelectedEncounterId(eid);
+    }
   };
 
   // Handle care status update
@@ -184,7 +260,7 @@ function AppShell() {
       actor: currentStaff.name,
       actorRole: currentStaff.role,
       action: 'Reassessment Recorded',
-      details: `Reassessment completed (Version ${newAssessment.version}). Priority: ${newAssessment.priority}. Reason/Notes: ${reasonNotes || 'Periodic observation'}`
+      details: `Reassessment completed (Version ${newAssessment.version}). Priority: ${newAssessment.priority} (${newAssessment.assessmentStatus}). Reason/Notes: ${reasonNotes || 'Periodic observation'}`
     };
 
     await repository.recordReassessment(selectedEncounterId, newAssessment, auditEvent);
@@ -195,7 +271,8 @@ function AppShell() {
       setPendingEmergencyModal({
         patient,
         assessment: newAssessment,
-        encounterId: selectedEncounterId
+        encounterId: selectedEncounterId,
+        fromRegistration: false
       });
     }
   };
@@ -229,7 +306,7 @@ function AppShell() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `PHC_RampurKalan_Triage_Export_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `XOR_Triage_RampurKalan_Export_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -241,12 +318,34 @@ function AppShell() {
     await repository.resetToCanonicalDemo();
     setSelectedPatientId(null);
     setSelectedEncounterId(null);
+    setPostRegistrationSummary(null);
+    setActiveReceiptTarget(null);
     refreshState();
   };
 
   // Selected encounter & patient object for details view
   const activeSelectedPatient = selectedPatientId ? repository.getPatient(selectedPatientId) : null;
   const activeSelectedEncounter = selectedEncounterId ? repository.getEncounter(selectedEncounterId) : null;
+
+  // Post-registration summary objects
+  const summaryPatient = postRegistrationSummary
+    ? repository.getPatient(postRegistrationSummary.patientId)
+    : null;
+  const summaryEncounter = postRegistrationSummary
+    ? repository.getEncounter(postRegistrationSummary.encounterId)
+    : null;
+  const summaryAssessment = summaryEncounter
+    ? summaryEncounter.assessmentHistory.find(a => a.id === summaryEncounter.currentAssessmentId) ||
+      summaryEncounter.assessmentHistory[summaryEncounter.assessmentHistory.length - 1]
+    : null;
+
+  // Active receipt preview modal objects
+  const receiptPatient = activeReceiptTarget
+    ? repository.getPatient(activeReceiptTarget.patientId)
+    : null;
+  const receiptEncounter = activeReceiptTarget
+    ? repository.getEncounter(activeReceiptTarget.encounterId)
+    : null;
 
   // Active emergency count (excludes Completed encounters)
   const activeEmergencyCount = encounters.filter(
@@ -279,6 +378,7 @@ function AppShell() {
         onRegisterClick={() => {
           setSelectedPatientId(null);
           setSelectedEncounterId(null);
+          setPostRegistrationSummary(null);
           setActiveTab('register');
         }}
       />
@@ -289,14 +389,39 @@ function AppShell() {
         onTabChange={(tab) => {
           setSelectedPatientId(null);
           setSelectedEncounterId(null);
+          setPostRegistrationSummary(null);
           setActiveTab(tab);
         }}
         activeEmergencyCount={activeEmergencyCount}
       />
 
       {/* Main Viewport Container */}
-      <main className="flex-1 app-container py-4 sm:py-5">
-        {activeSelectedPatient && activeSelectedEncounter ? (
+      <main className="flex-1 app-container py-4 sm:py-5 no-print">
+        {summaryPatient && summaryEncounter && summaryAssessment ? (
+          /* Post-Registration Assessment Summary Screen (Print Receipt, View Details, Return to Queue) */
+          <AssessmentSummaryView
+            patient={summaryPatient}
+            encounter={summaryEncounter}
+            assessment={summaryAssessment}
+            isOnline={isOnline}
+            onPrintReceipt={() =>
+              handleOpenReceipt(summaryPatient.id, summaryEncounter.id)
+            }
+            onViewDetails={() => {
+              const pid = summaryPatient.id;
+              const eid = summaryEncounter.id;
+              setPostRegistrationSummary(null);
+              setSelectedPatientId(pid);
+              setSelectedEncounterId(eid);
+            }}
+            onReturnToQueue={() => {
+              setPostRegistrationSummary(null);
+              setSelectedPatientId(null);
+              setSelectedEncounterId(null);
+              setActiveTab('queue');
+            }}
+          />
+        ) : activeSelectedPatient && activeSelectedEncounter ? (
           /* Screen 3 & 4: Patient Details, CDS Report, Reassessment, & Audit Trail */
           <PatientDetailView
             patient={activeSelectedPatient}
@@ -307,6 +432,9 @@ function AppShell() {
               setSelectedPatientId(null);
               setSelectedEncounterId(null);
             }}
+            onOpenReceipt={() =>
+              handleOpenReceipt(activeSelectedPatient.id, activeSelectedEncounter.id)
+            }
             onUpdateStatus={handleUpdateCareStatus}
             onRecordReassessment={handleRecordReassessment}
             onClinicianOverride={handleClinicianOverride}
@@ -317,12 +445,14 @@ function AppShell() {
             patients={patients}
             encounters={encounters}
             onSelectPatient={handleSelectPatient}
+            onPrintReceipt={handleOpenReceipt}
             onNewRegistration={() => setActiveTab('register')}
           />
         ) : activeTab === 'register' ? (
           /* Screen 2: New Patient Registration */
           <RegistrationView
             currentStaff={currentStaff}
+            isOnline={isOnline}
             onSaveSuccess={handleSaveRegistration}
             onCancel={() => setActiveTab('queue')}
           />
@@ -349,6 +479,17 @@ function AppShell() {
           assessment={pendingEmergencyModal.assessment}
           currentStaff={currentStaff}
           onAcknowledge={handleAcknowledgeEmergency}
+        />
+      )}
+
+      {/* Printable A4 Patient Receipt Modal (Accessible from Assessment Summary, Patient Details, and Live Queue) */}
+      {receiptPatient && receiptEncounter && (
+        <PatientReceiptModal
+          patient={receiptPatient}
+          encounter={receiptEncounter}
+          isOnline={isOnline}
+          onClose={() => setActiveReceiptTarget(null)}
+          onUpdatePrintStatus={handleUpdateReceiptPrintStatus}
         />
       )}
     </div>

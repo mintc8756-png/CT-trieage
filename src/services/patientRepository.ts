@@ -1,6 +1,7 @@
 /**
  * IndexedDB Repository & Offline Data Store
  * Database: AITriage_RuralPHC_DB (v2)
+ * Includes non-destructive migration for legacy URGENT records and offline receipt metadata.
  */
 
 import {
@@ -9,7 +10,8 @@ import {
   TriageAssessment,
   AuditEvent,
   CareStatus,
-  ClinicalPriority
+  TriagePriority,
+  ReceiptPrintStatus
 } from '../types/triage';
 
 import {
@@ -46,7 +48,6 @@ class PatientRepository {
     if (this.isInitialized) return;
 
     return new Promise((resolve) => {
-      // Check if IndexedDB is available
       if (typeof window === 'undefined' || !window.indexedDB) {
         this.loadDefaultDemoData();
         this.isInitialized = true;
@@ -81,7 +82,6 @@ class PatientRepository {
         };
 
         request.onerror = () => {
-          // Fallback to local storage / memory
           this.loadDefaultDemoData();
           this.isInitialized = true;
           resolve();
@@ -94,6 +94,125 @@ class PatientRepository {
     });
   }
 
+  /**
+   * Safe, non-destructive migration for existing records:
+   * - Preserves historical assessment records
+   * - Does NOT silently convert legacy Urgent records into ordinary Routine; flags them as HUMAN_REVIEW_REQUIRED
+   * - Ensures every encounter has a stable receiptId and timestamps
+   */
+  private migrateSingleAssessment(asm: TriageAssessment): { migrated: TriageAssessment; changed: boolean } {
+    let changed = false;
+    const rawPriority = asm.priority as string;
+    const updatedRules = (asm.triggeredRules || []).map(rule => {
+      if ((rule.severity as string) !== 'EMERGENCY' && (rule.severity as string) !== 'HUMAN_REVIEW_REQUIRED') {
+        changed = true;
+        return {
+          ...rule,
+          severity: 'HUMAN_REVIEW_REQUIRED' as const
+        };
+      }
+      return rule;
+    });
+
+    let priority: TriagePriority = rawPriority === 'EMERGENCY' ? 'EMERGENCY' : 'ROUTINE';
+    let requiresHumanReview = Boolean(asm.requiresHumanReview);
+    let humanReviewReason = asm.humanReviewReason;
+    let legacyPriorityFlag = asm.legacyPriorityFlag;
+
+    if (rawPriority !== 'EMERGENCY' && rawPriority !== 'ROUTINE') {
+      changed = true;
+      priority = 'ROUTINE';
+      requiresHumanReview = true;
+      legacyPriorityFlag =
+        legacyPriorityFlag ||
+        `Historical assessment recorded under legacy 3-tier protocol (${rawPriority}). Flagged for clinician review under Two-Level Triage System.`;
+      humanReviewReason =
+        humanReviewReason ||
+        'Legacy intermediate priority record flagged for human clinical review (never silently treated as standard Routine).';
+    }
+
+    const assessmentStatus =
+      priority !== 'EMERGENCY' && (requiresHumanReview || updatedRules.some(r => r.severity === 'HUMAN_REVIEW_REQUIRED'))
+        ? 'HUMAN_REVIEW_REQUIRED'
+        : 'ASSESSED';
+
+    if (asm.assessmentStatus !== assessmentStatus) {
+      changed = true;
+    }
+
+    return {
+      migrated: {
+        ...asm,
+        priority,
+        assessmentStatus,
+        triggeredRules: updatedRules,
+        requiresHumanReview,
+        humanReviewReason,
+        legacyPriorityFlag
+      },
+      changed
+    };
+  }
+
+  private migrateSingleEncounter(enc: Encounter): { migrated: Encounter; changed: boolean } {
+    let changed = false;
+    const migratedHistory = (enc.assessmentHistory || []).map(a => {
+      const res = this.migrateSingleAssessment(a);
+      if (res.changed) changed = true;
+      return res.migrated;
+    });
+
+    const currentAsm =
+      migratedHistory.find(a => a.id === enc.currentAssessmentId) ||
+      migratedHistory[migratedHistory.length - 1];
+
+    const rawEncPriority = enc.priority as string;
+    let priority: TriagePriority = rawEncPriority === 'EMERGENCY' ? 'EMERGENCY' : 'ROUTINE';
+    let assessmentStatus = currentAsm?.assessmentStatus || enc.assessmentStatus || 'ASSESSED';
+
+    if (rawEncPriority !== 'EMERGENCY' && rawEncPriority !== 'ROUTINE') {
+      changed = true;
+      priority = 'ROUTINE';
+      assessmentStatus = 'HUMAN_REVIEW_REQUIRED';
+    } else if (currentAsm && priority !== currentAsm.priority && !currentAsm.isOverridden) {
+      priority = currentAsm.priority;
+      changed = true;
+    }
+
+    const receiptSuffix = enc.id.replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || '1001';
+    const receiptId = enc.receiptId || `RCP-2026-${receiptSuffix}`;
+    const arrivalTimestamp = enc.arrivalTimestamp || enc.createdAt || new Date().toISOString();
+    const registeredAt = enc.registeredAt || enc.createdAt || new Date().toISOString();
+    const receiptGeneratedAt = enc.receiptGeneratedAt || currentAsm?.assessedAt || enc.updatedAt || new Date().toISOString();
+    const receiptPrintStatus = enc.receiptPrintStatus || 'RECEIPT_GENERATED';
+
+    if (
+      !enc.receiptId ||
+      !enc.arrivalTimestamp ||
+      !enc.registeredAt ||
+      !enc.receiptGeneratedAt ||
+      !enc.receiptPrintStatus ||
+      enc.assessmentStatus !== assessmentStatus
+    ) {
+      changed = true;
+    }
+
+    return {
+      migrated: {
+        ...enc,
+        priority,
+        assessmentStatus,
+        receiptId,
+        arrivalTimestamp,
+        registeredAt,
+        receiptGeneratedAt,
+        receiptPrintStatus,
+        assessmentHistory: migratedHistory
+      },
+      changed
+    };
+  }
+
   private async loadFromIndexedDB(): Promise<void> {
     if (!this.db) {
       this.loadDefaultDemoData();
@@ -103,7 +222,6 @@ class PatientRepository {
     try {
       const pCount = await this.countStore('patients');
       if (pCount === 0) {
-        // First run: populate with canonical 6 demonstration cases
         await this.populateDefaultDemoData();
       } else {
         const patients = await this.getAllFromStore<Patient>('patients');
@@ -112,9 +230,28 @@ class PatientRepository {
         const auditLogs = await this.getAllFromStore<AuditEvent>('auditLogs');
 
         patients.forEach(p => this.patientsCache.set(p.id, p));
-        encounters.forEach(e => this.encountersCache.set(e.id, e));
-        assessments.forEach(a => this.assessmentsCache.set(a.id, a));
-        this.auditLogsCache = auditLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+        for (const a of assessments) {
+          const { migrated, changed } = this.migrateSingleAssessment(a);
+          this.assessmentsCache.set(migrated.id, migrated);
+          if (changed) {
+            await this.putToStore('assessments', migrated);
+          }
+        }
+
+        for (const e of encounters) {
+          const { migrated, changed } = this.migrateSingleEncounter(e);
+          this.encountersCache.set(migrated.id, migrated);
+          migrated.assessmentHistory.forEach(a => this.assessmentsCache.set(a.id, a));
+          if (changed) {
+            await this.putToStore('encounters', migrated);
+          }
+        }
+
+        this.auditLogsCache = auditLogs.sort(
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        this.persistFallback();
       }
     } catch {
       this.loadDefaultDemoData();
@@ -122,15 +259,22 @@ class PatientRepository {
   }
 
   private loadDefaultDemoData(): void {
-    // Check localStorage first
     try {
       const saved = localStorage.getItem('ai_triage_fallback_data');
       if (saved) {
         const parsed = JSON.parse(saved) as AppStateData;
         parsed.patients.forEach(p => this.patientsCache.set(p.id, p));
-        parsed.encounters.forEach(e => this.encountersCache.set(e.id, e));
-        parsed.assessments.forEach(a => this.assessmentsCache.set(a.id, a));
-        this.auditLogsCache = parsed.auditLogs;
+        parsed.assessments.forEach(a => {
+          const { migrated } = this.migrateSingleAssessment(a);
+          this.assessmentsCache.set(migrated.id, migrated);
+        });
+        parsed.encounters.forEach(e => {
+          const { migrated } = this.migrateSingleEncounter(e);
+          this.encountersCache.set(migrated.id, migrated);
+          migrated.assessmentHistory.forEach(a => this.assessmentsCache.set(a.id, a));
+        });
+        this.auditLogsCache = parsed.auditLogs || [];
+        this.persistFallback();
         return;
       }
     } catch {}
@@ -148,7 +292,16 @@ class PatientRepository {
   }
 
   private async populateDefaultDemoData(): Promise<void> {
-    this.loadDefaultDemoData();
+    this.patientsCache.clear();
+    this.encountersCache.clear();
+    this.assessmentsCache.clear();
+
+    CANONICAL_PATIENTS.forEach(p => this.patientsCache.set(p.id, p));
+    CANONICAL_ENCOUNTERS.forEach(e => this.encountersCache.set(e.id, e));
+    CANONICAL_ASSESSMENTS.forEach(a => this.assessmentsCache.set(a.id, a));
+    this.auditLogsCache = [...INITIAL_AUDIT_LOGS];
+
+    this.persistFallback();
     if (!this.db) return;
 
     for (const p of CANONICAL_PATIENTS) {
@@ -190,7 +343,7 @@ class PatientRepository {
         store.put(item);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
-      } catch (err) {
+      } catch {
         resolve();
       }
     });
@@ -284,18 +437,19 @@ class PatientRepository {
   public async recordReassessment(
     encounterId: string,
     newAssessment: TriageAssessment,
-    auditEvent: AuditEvent
+    auditEvent: AuditEvent,
+    isOnline = true
   ): Promise<Encounter | null> {
     const enc = this.encountersCache.get(encounterId);
     if (!enc) return null;
 
-    // Update encounter priority, active assessment ID, and history
     enc.priority = newAssessment.priority;
+    enc.assessmentStatus = newAssessment.assessmentStatus;
     enc.currentAssessmentId = newAssessment.id;
     enc.assessmentHistory.push(newAssessment);
     enc.updatedAt = new Date().toISOString();
     enc.status = 'Under Clinical Review';
-    enc.syncStatus = 'Pending Sync';
+    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
 
     this.assessmentsCache.set(newAssessment.id, newAssessment);
     this.encountersCache.set(encounterId, enc);
@@ -313,7 +467,8 @@ class PatientRepository {
     encounterId: string,
     newStatus: CareStatus,
     actorName: string,
-    actorRole: string
+    actorRole: string,
+    isOnline = true
   ): Promise<void> {
     const enc = this.encountersCache.get(encounterId);
     if (!enc) return;
@@ -321,7 +476,7 @@ class PatientRepository {
     const oldStatus = enc.status;
     enc.status = newStatus;
     enc.updatedAt = new Date().toISOString();
-    enc.syncStatus = 'Pending Sync';
+    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
 
     const audit: AuditEvent = {
       id: 'AUD-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
@@ -344,9 +499,10 @@ class PatientRepository {
 
   public async applyClinicianOverride(
     encounterId: string,
-    newPriority: ClinicalPriority,
+    newPriority: TriagePriority,
     doctorName: string,
-    justification: string
+    justification: string,
+    isOnline = true
   ): Promise<void> {
     const enc = this.encountersCache.get(encounterId);
     if (!enc) return;
@@ -354,10 +510,14 @@ class PatientRepository {
     const currentAsm = this.assessmentsCache.get(enc.currentAssessmentId);
     const oldPriority = enc.priority;
     enc.priority = newPriority;
+    enc.assessmentStatus = 'ASSESSED';
     enc.updatedAt = new Date().toISOString();
-    enc.syncStatus = 'Pending Sync';
+    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
 
     if (currentAsm) {
+      currentAsm.priority = newPriority;
+      currentAsm.assessmentStatus = 'ASSESSED';
+      currentAsm.requiresHumanReview = false;
       currentAsm.isOverridden = true;
       currentAsm.overrideDetails = {
         originalPriority: oldPriority,
@@ -386,6 +546,38 @@ class PatientRepository {
 
     await this.putToStore('encounters', enc);
     await this.putToStore('auditLogs', audit);
+    this.persistFallback();
+  }
+
+  public async updateReceiptPrintStatus(
+    encounterId: string,
+    printStatus: ReceiptPrintStatus,
+    actorName: string,
+    actorRole: string
+  ): Promise<void> {
+    const enc = this.encountersCache.get(encounterId);
+    if (!enc) return;
+
+    enc.receiptPrintStatus = printStatus;
+    enc.lastPrintAttemptAt = new Date().toISOString();
+
+    if (printStatus === 'PRINT_DIALOG_OPENED' || printStatus === 'PRINTED_CONFIRMED') {
+      const audit: AuditEvent = {
+        id: 'AUD-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
+        encounterId,
+        patientId: enc.patientId,
+        timestamp: new Date().toISOString(),
+        actor: actorName,
+        actorRole,
+        action: printStatus === 'PRINTED_CONFIRMED' ? 'Patient Receipt Printed' : 'Patient Receipt Print Dialog Opened',
+        details: `Receipt ${enc.receiptId} print status recorded as ${printStatus}.`
+      };
+      this.auditLogsCache.unshift(audit);
+      await this.putToStore('auditLogs', audit);
+    }
+
+    this.encountersCache.set(encounterId, enc);
+    await this.putToStore('encounters', enc);
     this.persistFallback();
   }
 
@@ -433,8 +625,15 @@ class PatientRepository {
     const encounters = Array.from(this.encountersCache.values());
 
     for (const enc of encounters) {
-      if (enc.syncStatus === 'Pending Sync' || enc.syncStatus === 'Saved Locally') {
-        enc.syncStatus = 'Synced';
+      if (
+        enc.syncStatus === 'LOCAL_ONLY' ||
+        enc.syncStatus === 'PENDING_SYNC' ||
+        enc.syncStatus === 'Saved Locally' ||
+        enc.syncStatus === 'Pending Sync' ||
+        enc.syncStatus === 'SYNC_FAILED'
+      ) {
+        // Preserve original arrival, registration, and receipt metadata while marking SYNCED
+        enc.syncStatus = 'SYNCED';
         enc.updatedAt = new Date().toISOString();
         await this.putToStore('encounters', enc);
         count++;
@@ -450,7 +649,7 @@ class PatientRepository {
         actor: 'Background Sync Worker',
         actorRole: 'System',
         action: 'Cloud Synchronization Successful',
-        details: `Reconciled ${count} offline pending health record(s) to central registry.`
+        details: `Reconciled ${count} offline pending health record(s) to central registry using stable encounter and receipt IDs.`
       };
       this.auditLogsCache.unshift(audit);
       await this.putToStore('auditLogs', audit);

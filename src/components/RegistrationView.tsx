@@ -17,6 +17,7 @@ import {
 
 interface RegistrationViewProps {
   currentStaff: StaffProfile;
+  isOnline: boolean;
   onSaveSuccess: (patient: Patient, encounter: Encounter, assessment: TriageAssessment) => void;
   onCancel: () => void;
 }
@@ -53,16 +54,24 @@ const MEDICAL_HISTORY_OPTIONS = [
 
 export const RegistrationView: React.FC<RegistrationViewProps> = ({
   currentStaff,
+  isOnline,
   onSaveSuccess,
   onCancel
 }) => {
   const { t, dict } = useI18n();
 
-  // Generate random unique ID
+  // Generate unique Patient ID and Receipt ID on form open, and capture original arrival time
   const [patientId] = useState(() => {
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     return `PHC-2026-${randomNum}`;
   });
+
+  const [receiptId] = useState(() => {
+    const randomNum = Math.floor(1000 + Math.random() * 9000);
+    return `RCP-2026-${randomNum}`;
+  });
+
+  const [arrivalTimestamp] = useState(() => new Date().toISOString());
 
   // Section A — Demographics
   const [fullName, setFullName] = useState('');
@@ -165,6 +174,8 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
       return;
     }
 
+    const nowIso = new Date().toISOString();
+
     const patientRecord: Patient = {
       id: patientId,
       fullName: fullName.trim(),
@@ -173,7 +184,7 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
       village: village.trim(),
       phone: phone.trim() || undefined,
       accompanyingPerson: accompanyingPerson.trim() || undefined,
-      registeredAt: new Date().toISOString(),
+      registeredAt: nowIso,
       registeredBy: `${currentStaff.name} (${currentStaff.role})`
     };
 
@@ -211,7 +222,7 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
         unit: 'breaths/min',
         isUnavailable: rrUnavailable
       },
-      measuredAt: new Date().toISOString(),
+      measuredAt: nowIso,
       measuredBy: currentStaff.name
     };
 
@@ -228,7 +239,7 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
     const effectiveAllergies = sectionCUnavailable ? undefined : allergies.trim() || undefined;
     const effectiveNotes = sectionCUnavailable ? undefined : clinicalNotes.trim() || undefined;
 
-    // Run deterministic triage engine
+    // Run deterministic two-level triage engine
     const assessment = evaluateTriage({
       encounterId,
       patientId,
@@ -242,6 +253,7 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
 
     const encounterRecord: Encounter = {
       id: encounterId,
+      receiptId,
       patientId,
       chiefComplaint: effectiveComplaint,
       symptoms: effectiveSymptoms,
@@ -256,11 +268,16 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
       vitalSigns: vitalSignsData,
       status: 'Awaiting Assessment',
       priority: assessment.priority,
-      syncStatus: 'Pending Sync',
+      assessmentStatus: assessment.assessmentStatus,
+      syncStatus: isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY',
       currentAssessmentId: assessment.id,
       assessmentHistory: [assessment],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      arrivalTimestamp,
+      registeredAt: nowIso,
+      receiptGeneratedAt: nowIso,
+      receiptPrintStatus: 'RECEIPT_GENERATED',
+      createdAt: nowIso,
+      updatedAt: nowIso
     };
 
     onSaveSuccess(patientRecord, encounterRecord, assessment);
@@ -293,9 +310,14 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
           <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider font-display">
             {t('registration.sectionA')}
           </h2>
-          <span className="text-xs font-mono font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-            {t('registration.idPrefix')} {patientId}
-          </span>
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+              {t('registration.idPrefix')} {patientId}
+            </span>
+            <span className="font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded hidden sm:inline">
+              {receiptId}
+            </span>
+          </div>
         </div>
 
         <div className="registration-grid-section-a text-xs">
@@ -387,7 +409,7 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
             />
           </div>
 
-          {/* Accompanying Person: 2 columns on desktop & tablet so the row is balanced without wasted empty columns */}
+          {/* Accompanying Person: 2 columns on desktop & tablet */}
           <div className="space-y-1 sm:col-span-2 lg:col-span-2 min-w-0">
             <label className="font-medium text-slate-700 block">
               {t('registration.accompanyingPerson')}

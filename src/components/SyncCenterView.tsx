@@ -41,9 +41,15 @@ export const SyncCenterView: React.FC<SyncCenterViewProps> = ({
   const [resetConfirm, setResetConfirm] = useState(false);
 
   const pendingSyncEncounters = encounters.filter(
-    e => e.syncStatus === 'Pending Sync' || e.syncStatus === 'Saved Locally'
+    e =>
+      e.syncStatus === 'LOCAL_ONLY' ||
+      e.syncStatus === 'PENDING_SYNC' ||
+      e.syncStatus === 'Pending Sync' ||
+      e.syncStatus === 'Saved Locally'
   );
-  const syncedEncounters = encounters.filter(e => e.syncStatus === 'Synced');
+  const syncedEncounters = encounters.filter(
+    e => e.syncStatus === 'SYNCED' || e.syncStatus === 'Synced'
+  );
 
   const handleTriggerSync = async () => {
     if (!isOnline) {
@@ -224,12 +230,12 @@ export const SyncCenterView: React.FC<SyncCenterViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {encounters.map((enc) => {
                 const pat = patients.find(p => p.id === enc.patientId);
-                const isSynced = enc.syncStatus === 'Synced';
+                const isSynced = enc.syncStatus === 'SYNCED' || enc.syncStatus === 'Synced';
 
                 return (
                   <tr key={enc.id} className="hover:bg-slate-50">
                     <td className="py-2.5 px-2 font-mono font-medium text-slate-800">
-                      {enc.patientId}
+                      {enc.patientId} · {enc.receiptId}
                       <span className="block text-[11px] text-slate-500 font-sans">
                         {pat?.fullName || t('queue.unknownPatient')}
                       </span>
@@ -241,8 +247,6 @@ export const SyncCenterView: React.FC<SyncCenterViewProps> = ({
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                         enc.priority === 'EMERGENCY'
                           ? 'bg-red-100 text-red-800'
-                          : enc.priority === 'URGENT'
-                          ? 'bg-amber-100 text-amber-800'
                           : 'bg-emerald-100 text-emerald-800'
                       }`}>
                         {dict.priorities[enc.priority] || enc.priority}
@@ -255,7 +259,7 @@ export const SyncCenterView: React.FC<SyncCenterViewProps> = ({
                       {isSynced ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
                           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                          <span>{dict.syncStatus['Synced']}</span>
+                          <span>{dict.syncStatus['SYNCED']}</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-800 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded">

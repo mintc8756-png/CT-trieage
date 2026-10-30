@@ -1,24 +1,32 @@
 import React, { useState, useMemo } from 'react';
 import { Patient, Encounter } from '../types/triage';
 import { useI18n } from '../i18n';
-import { Search, ArrowUpDown, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Search, ArrowUpDown, ChevronRight, AlertTriangle, Printer } from 'lucide-react';
 
 interface QueueViewProps {
   patients: Patient[];
   encounters: Encounter[];
   onSelectPatient: (patientId: string, encounterId: string) => void;
+  onPrintReceipt: (patientId: string, encounterId: string) => void;
   onNewRegistration: () => void;
 }
 
-type PriorityFilter = 'ALL' | 'EMERGENCY' | 'URGENT' | 'ROUTINE' | 'PENDING_SYNC';
+type QueueFilter =
+  | 'ALL'
+  | 'EMERGENCY'
+  | 'ROUTINE'
+  | 'AWAITING_ASSESSMENT'
+  | 'HUMAN_REVIEW_REQUIRED'
+  | 'PENDING_SYNC';
 
 export const QueueView: React.FC<QueueViewProps> = ({
   patients,
   encounters,
-  onSelectPatient
+  onSelectPatient,
+  onPrintReceipt
 }) => {
   const { t, dict } = useI18n();
-  const [filter, setFilter] = useState<PriorityFilter>('ALL');
+  const [filter, setFilter] = useState<QueueFilter>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'URGENCY_FIRST' | 'WAITING_TIME'>('URGENCY_FIRST');
 
@@ -33,9 +41,14 @@ export const QueueView: React.FC<QueueViewProps> = ({
         enc.assessmentHistory.find(a => a.id === enc.currentAssessmentId) ||
         enc.assessmentHistory[enc.assessmentHistory.length - 1];
 
+      const isHumanReview =
+        enc.assessmentStatus === 'HUMAN_REVIEW_REQUIRED' ||
+        Boolean(currentAssessment?.requiresHumanReview);
+
       return {
         encounter: enc,
         assessment: currentAssessment,
+        isHumanReview,
         patient: patient || {
           id: enc.patientId,
           fullName: t('queue.unknownPatient'),
@@ -49,49 +62,102 @@ export const QueueView: React.FC<QueueViewProps> = ({
     });
   }, [patients, encounters, t]);
 
-  // Aggregate stats (Exclude completed encounters from active emergency counts)
+  // Aggregate stats (two-level priority + awaiting assessment + human review required)
   const stats = useMemo(() => {
     let emergency = 0;
-    let urgent = 0;
     let routine = 0;
     let awaitingReview = 0;
+    let humanReview = 0;
     let pendingSync = 0;
 
-    pairedData.forEach(({ encounter }) => {
+    pairedData.forEach(({ encounter, isHumanReview }) => {
       const isCompleted = encounter.status === 'Completed';
       if (encounter.priority === 'EMERGENCY' && !isCompleted) emergency++;
-      else if (encounter.priority === 'URGENT' && !isCompleted) urgent++;
       else if (encounter.priority === 'ROUTINE' && !isCompleted) routine++;
 
-      if (encounter.status === 'Awaiting Assessment' || encounter.status === 'Reassessment Required') {
+      if (
+        encounter.status === 'Awaiting Assessment' ||
+        encounter.status === 'Reassessment Required'
+      ) {
         awaitingReview++;
       }
-      if (encounter.syncStatus === 'Pending Sync' || encounter.syncStatus === 'Saved Locally') {
+
+      if (isHumanReview && !isCompleted) {
+        humanReview++;
+      }
+
+      if (
+        encounter.syncStatus === 'LOCAL_ONLY' ||
+        encounter.syncStatus === 'PENDING_SYNC' ||
+        encounter.syncStatus === 'Pending Sync' ||
+        encounter.syncStatus === 'Saved Locally'
+      ) {
         pendingSync++;
       }
     });
 
-    return { emergency, urgent, routine, awaitingReview, pendingSync, total: pairedData.length };
+    return {
+      emergency,
+      routine,
+      awaitingReview,
+      humanReview,
+      pendingSync,
+      total: pairedData.length
+    };
   }, [pairedData]);
 
   // Filter & Search
   const filteredData = useMemo(() => {
-    return pairedData.filter(({ encounter, patient }) => {
-      // Filter tab check
-      if (filter === 'EMERGENCY' && (encounter.priority !== 'EMERGENCY' || encounter.status === 'Completed')) return false;
-      if (filter === 'URGENT' && (encounter.priority !== 'URGENT' || encounter.status === 'Completed')) return false;
-      if (filter === 'ROUTINE' && (encounter.priority !== 'ROUTINE' || encounter.status === 'Completed')) return false;
-      if (filter === 'PENDING_SYNC' && encounter.syncStatus === 'Synced') return false;
+    return pairedData.filter(({ encounter, patient, isHumanReview }) => {
+      if (
+        filter === 'EMERGENCY' &&
+        (encounter.priority !== 'EMERGENCY' || encounter.status === 'Completed')
+      ) {
+        return false;
+      }
+      if (
+        filter === 'ROUTINE' &&
+        (encounter.priority !== 'ROUTINE' || encounter.status === 'Completed')
+      ) {
+        return false;
+      }
+      if (
+        filter === 'AWAITING_ASSESSMENT' &&
+        encounter.status !== 'Awaiting Assessment' &&
+        encounter.status !== 'Reassessment Required'
+      ) {
+        return false;
+      }
+      if (
+        filter === 'HUMAN_REVIEW_REQUIRED' &&
+        (!isHumanReview || encounter.status === 'Completed')
+      ) {
+        return false;
+      }
+      if (
+        filter === 'PENDING_SYNC' &&
+        (encounter.syncStatus === 'SYNCED' || encounter.syncStatus === 'Synced')
+      ) {
+        return false;
+      }
 
       // Search query check
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchName = patient.fullName.toLowerCase().includes(q);
         const matchId = patient.id.toLowerCase().includes(q);
+        const matchReceipt = (encounter.receiptId || '').toLowerCase().includes(q);
         const matchVillage = patient.village.toLowerCase().includes(q);
         const matchComplaint = encounter.chiefComplaint.toLowerCase().includes(q);
         const matchSymptoms = encounter.symptoms.some(s => s.toLowerCase().includes(q));
-        if (!matchName && !matchId && !matchVillage && !matchComplaint && !matchSymptoms) {
+        if (
+          !matchName &&
+          !matchId &&
+          !matchReceipt &&
+          !matchVillage &&
+          !matchComplaint &&
+          !matchSymptoms
+        ) {
           return false;
         }
       }
@@ -100,18 +166,26 @@ export const QueueView: React.FC<QueueViewProps> = ({
     });
   }, [pairedData, filter, searchQuery]);
 
-  // Sorting: Urgency first (Emergency -> Urgent -> Routine), then by oldest registration time first
-  // Underlying timestamps remain preserved and active for fair queue ordering
+  // Sorting: Priority first (Emergency -> Routine with Human Review -> Standard Routine), then oldest registration time first
   const sortedData = useMemo(() => {
-    const priorityWeight = { EMERGENCY: 1, URGENT: 2, ROUTINE: 3 };
+    const priorityWeight = { EMERGENCY: 1, ROUTINE: 2 };
 
     return [...filteredData].sort((a, b) => {
       if (sortBy === 'URGENCY_FIRST') {
-        const pDiff = priorityWeight[a.encounter.priority] - priorityWeight[b.encounter.priority];
+        const pDiff =
+          priorityWeight[a.encounter.priority] - priorityWeight[b.encounter.priority];
         if (pDiff !== 0) return pDiff;
+
+        // Within Routine, surface cases requiring Human Review before standard Assessed cases
+        if (a.isHumanReview !== b.isHumanReview) {
+          return a.isHumanReview ? -1 : 1;
+        }
       }
       // Oldest arrival/registration timestamp first
-      return new Date(a.encounter.createdAt).getTime() - new Date(b.encounter.createdAt).getTime();
+      return (
+        new Date(a.encounter.createdAt).getTime() -
+        new Date(b.encounter.createdAt).getTime()
+      );
     });
   }, [filteredData, sortBy]);
 
@@ -129,20 +203,25 @@ export const QueueView: React.FC<QueueViewProps> = ({
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setSortBy(s => s === 'URGENCY_FIRST' ? 'WAITING_TIME' : 'URGENCY_FIRST')}
+            onClick={() =>
+              setSortBy(s => (s === 'URGENCY_FIRST' ? 'WAITING_TIME' : 'URGENCY_FIRST'))
+            }
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
           >
             <ArrowUpDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
             <span>
-              {t('queue.sortLabel')} {sortBy === 'URGENCY_FIRST' ? t('queue.sortUrgencyFirst') : t('queue.sortWaitingTime')}
+              {t('queue.sortLabel')}{' '}
+              {sortBy === 'URGENCY_FIRST'
+                ? t('queue.sortUrgencyFirst')
+                : t('queue.sortWaitingTime')}
             </span>
           </button>
         </div>
       </div>
 
-      {/* Compact Summary Status Row */}
+      {/* Summary Status Cards: Emergency Patients, Routine Patients, Awaiting Assessment, Human Review Required */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {/* Emergency Count */}
+        {/* 1. Emergency Patients */}
         <div
           onClick={() => setFilter(filter === 'EMERGENCY' ? 'ALL' : 'EMERGENCY')}
           className={`p-3.5 rounded-lg border cursor-pointer transition-colors ${
@@ -153,38 +232,21 @@ export const QueueView: React.FC<QueueViewProps> = ({
             <span className="text-xs font-semibold text-red-900 uppercase tracking-wider">
               {t('queue.summaryEmergency')}
             </span>
-            <span className="text-red-700 text-xs font-mono">{t('queue.summaryEmergencySub')}</span>
+            <span className="text-red-700 text-xs font-mono">
+              {t('queue.summaryEmergencySub')}
+            </span>
           </div>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono text-red-700 tabular-nums">
               {stats.emergency}
             </span>
-            <span className="text-xs text-red-600 font-medium">{t('queue.patientsUnit')}</span>
+            <span className="text-xs text-red-600 font-medium">
+              {t('queue.patientsUnit')}
+            </span>
           </div>
         </div>
 
-        {/* Urgent Count */}
-        <div
-          onClick={() => setFilter(filter === 'URGENT' ? 'ALL' : 'URGENT')}
-          className={`p-3.5 rounded-lg border cursor-pointer transition-colors ${
-            filter === 'URGENT' ? 'ring-2 ring-amber-500' : ''
-          } bg-amber-50/70 border-amber-200`}
-        >
-          <div className="flex items-center justify-between gap-1">
-            <span className="text-xs font-semibold text-amber-900 uppercase tracking-wider">
-              {t('queue.summaryUrgent')}
-            </span>
-            <span className="text-amber-700 text-xs font-mono">{t('queue.summaryUrgentSub')}</span>
-          </div>
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-amber-700 tabular-nums">
-              {stats.urgent}
-            </span>
-            <span className="text-xs text-amber-600 font-medium">{t('queue.patientsUnit')}</span>
-          </div>
-        </div>
-
-        {/* Routine Count */}
+        {/* 2. Routine Patients */}
         <div
           onClick={() => setFilter(filter === 'ROUTINE' ? 'ALL' : 'ROUTINE')}
           className={`p-3.5 rounded-lg border cursor-pointer transition-colors ${
@@ -195,23 +257,36 @@ export const QueueView: React.FC<QueueViewProps> = ({
             <span className="text-xs font-semibold text-emerald-900 uppercase tracking-wider">
               {t('queue.summaryRoutine')}
             </span>
-            <span className="text-emerald-700 text-xs font-mono">{t('queue.summaryRoutineSub')}</span>
+            <span className="text-emerald-700 text-xs font-mono">
+              {t('queue.summaryRoutineSub')}
+            </span>
           </div>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono text-emerald-700 tabular-nums">
               {stats.routine}
             </span>
-            <span className="text-xs text-emerald-600 font-medium">{t('queue.patientsUnit')}</span>
+            <span className="text-xs text-emerald-600 font-medium">
+              {t('queue.patientsUnit')}
+            </span>
           </div>
         </div>
 
-        {/* Total Waiting / Awaiting Assessment */}
-        <div className="p-3.5 rounded-lg border bg-white border-slate-200">
+        {/* 3. Awaiting Assessment */}
+        <div
+          onClick={() =>
+            setFilter(filter === 'AWAITING_ASSESSMENT' ? 'ALL' : 'AWAITING_ASSESSMENT')
+          }
+          className={`p-3.5 rounded-lg border cursor-pointer transition-colors ${
+            filter === 'AWAITING_ASSESSMENT' ? 'ring-2 ring-blue-500' : ''
+          } bg-white border-slate-200`}
+        >
           <div className="flex items-center justify-between gap-1">
             <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
               {t('queue.summaryAwaiting')}
             </span>
-            <span className="text-slate-400 text-xs font-mono">{t('queue.summaryAwaitingSub')}</span>
+            <span className="text-slate-400 text-xs font-mono">
+              {t('queue.summaryAwaitingSub')}
+            </span>
           </div>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono text-slate-800 tabular-nums">
@@ -219,6 +294,33 @@ export const QueueView: React.FC<QueueViewProps> = ({
             </span>
             <span className="text-xs text-slate-500 font-medium">
               {t('queue.ofTotal', { total: stats.total })}
+            </span>
+          </div>
+        </div>
+
+        {/* 4. Human Review Required */}
+        <div
+          onClick={() =>
+            setFilter(filter === 'HUMAN_REVIEW_REQUIRED' ? 'ALL' : 'HUMAN_REVIEW_REQUIRED')
+          }
+          className={`p-3.5 rounded-lg border cursor-pointer transition-colors ${
+            filter === 'HUMAN_REVIEW_REQUIRED' ? 'ring-2 ring-amber-500' : ''
+          } bg-amber-50/70 border-amber-200`}
+        >
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-xs font-semibold text-amber-900 uppercase tracking-wider">
+              {t('queue.summaryHumanReview')}
+            </span>
+            <span className="text-amber-700 text-xs font-mono">
+              {t('queue.summaryHumanReviewSub')}
+            </span>
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-2xl font-bold font-mono text-amber-800 tabular-nums">
+              {stats.humanReview}
+            </span>
+            <span className="text-xs text-amber-700 font-medium">
+              {t('queue.patientsUnit')}
             </span>
           </div>
         </div>
@@ -248,16 +350,6 @@ export const QueueView: React.FC<QueueViewProps> = ({
             {t('queue.filterEmergency', { count: stats.emergency })}
           </button>
           <button
-            onClick={() => setFilter('URGENT')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-              filter === 'URGENT'
-                ? 'bg-amber-600 text-white font-semibold'
-                : 'text-amber-800 hover:bg-amber-50'
-            }`}
-          >
-            {t('queue.filterUrgent', { count: stats.urgent })}
-          </button>
-          <button
             onClick={() => setFilter('ROUTINE')}
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
               filter === 'ROUTINE'
@@ -266,6 +358,26 @@ export const QueueView: React.FC<QueueViewProps> = ({
             }`}
           >
             {t('queue.filterRoutine', { count: stats.routine })}
+          </button>
+          <button
+            onClick={() => setFilter('AWAITING_ASSESSMENT')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              filter === 'AWAITING_ASSESSMENT'
+                ? 'bg-blue-600 text-white font-semibold'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            {t('queue.filterAwaiting', { count: stats.awaitingReview })}
+          </button>
+          <button
+            onClick={() => setFilter('HUMAN_REVIEW_REQUIRED')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              filter === 'HUMAN_REVIEW_REQUIRED'
+                ? 'bg-amber-600 text-white font-semibold'
+                : 'text-amber-800 hover:bg-amber-50'
+            }`}
+          >
+            {t('queue.filterHumanReview', { count: stats.humanReview })}
           </button>
           {stats.pendingSync > 0 && (
             <button
@@ -309,7 +421,10 @@ export const QueueView: React.FC<QueueViewProps> = ({
           <p className="text-sm font-medium text-slate-700">{t('queue.emptyTitle')}</p>
           <p className="text-xs text-slate-500 mt-1">{t('queue.emptySubtext')}</p>
           <button
-            onClick={() => { setFilter('ALL'); setSearchQuery(''); }}
+            onClick={() => {
+              setFilter('ALL');
+              setSearchQuery('');
+            }}
             className="mt-3 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-medium cursor-pointer"
           >
             {t('queue.clearFilters')}
@@ -317,25 +432,23 @@ export const QueueView: React.FC<QueueViewProps> = ({
         </div>
       ) : (
         <>
-          {/* Desktop Table View — Strictly 6 Columns: Priority, Patient, Age / Sex, Key Vitals, Care Status, Action */}
+          {/* Desktop Table View — 6 Columns: Priority & Status, Patient, Age / Sex, Key Vitals, Care Status, Action */}
           <div className="hidden lg:block bg-white rounded-lg border border-slate-200 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
-                    <th className="py-3 px-4 w-44">{t('queue.colPriority')}</th>
+                    <th className="py-3 px-4 w-48">{t('queue.colPriority')}</th>
                     <th className="py-3 px-4">{t('queue.colPatient')}</th>
                     <th className="py-3 px-4 w-28">{t('queue.colAgeSex')}</th>
                     <th className="py-3 px-4">{t('queue.colKeyVitals')}</th>
                     <th className="py-3 px-4 w-44">{t('queue.colCareStatus')}</th>
-                    <th className="py-3 px-4 w-28 text-right">{t('queue.colAction')}</th>
+                    <th className="py-3 px-4 w-40 text-right">{t('queue.colAction')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {sortedData.map(({ encounter, patient, assessment }) => {
+                  {sortedData.map(({ encounter, patient, isHumanReview }) => {
                     const isEmergency = encounter.priority === 'EMERGENCY';
-                    const isUrgent = encounter.priority === 'URGENT';
-                    const requiresHumanReview = assessment?.requiresHumanReview;
                     const vs = encounter.vitalSigns;
 
                     const genderShort =
@@ -354,7 +467,7 @@ export const QueueView: React.FC<QueueViewProps> = ({
                           isEmergency ? 'bg-red-50/30' : ''
                         }`}
                       >
-                        {/* 1. Priority Badge */}
+                        {/* 1. Priority & Assessment Status */}
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <div className="flex flex-col items-start gap-1">
                             {isEmergency ? (
@@ -362,18 +475,13 @@ export const QueueView: React.FC<QueueViewProps> = ({
                                 <span className="w-2 h-2 rounded-full bg-red-600 shrink-0" />
                                 {t('priorities.EMERGENCY')}
                               </span>
-                            ) : isUrgent ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-100 text-amber-900 border border-amber-300">
-                                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-                                {t('priorities.URGENT')}
-                              </span>
                             ) : (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
                                 <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
                                 {t('priorities.ROUTINE')}
                               </span>
                             )}
-                            {requiresHumanReview && (
+                            {isHumanReview && (
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded">
                                 <AlertTriangle className="w-2.5 h-2.5 text-amber-700 shrink-0" />
                                 {t('priorities.HUMAN_REVIEW')}
@@ -389,32 +497,44 @@ export const QueueView: React.FC<QueueViewProps> = ({
                           </div>
                           <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-mono">
                             <span>{patient.id}</span>
+                            {encounter.receiptId && (
+                              <>
+                                <span>·</span>
+                                <span>{encounter.receiptId}</span>
+                              </>
+                            )}
                             <span>·</span>
-                            <span className="font-sans truncate max-w-[180px]">{patient.village}</span>
+                            <span className="font-sans truncate max-w-[160px]">
+                              {patient.village}
+                            </span>
                           </div>
                         </td>
 
                         {/* 3. Age / Sex */}
                         <td className="py-3.5 px-4 text-slate-600 tabular-nums whitespace-nowrap">
-                          {patient.age}{t('queue.yearsShort')} / {genderShort}
+                          {patient.age}
+                          {t('queue.yearsShort')} / {genderShort}
                         </td>
 
                         {/* 4. Key Vitals */}
                         <td className="py-3.5 px-4 font-mono text-[11px] tabular-nums">
                           <div className="flex flex-wrap items-center gap-1.5">
                             {/* SpO2 */}
-                            {vs.oxygenSaturation.isUnavailable || vs.oxygenSaturation.value === null ? (
+                            {vs.oxygenSaturation.isUnavailable ||
+                            vs.oxygenSaturation.value === null ? (
                               <span className="text-amber-900 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
                                 {t('queue.spo2Label')}: {t('queue.naShort')}
                               </span>
                             ) : (
-                              <span className={`px-1.5 py-0.5 rounded ${
-                                vs.oxygenSaturation.value < 90
-                                  ? 'bg-red-100 text-red-800 font-bold'
-                                  : vs.oxygenSaturation.value <= 93
-                                  ? 'bg-amber-100 text-amber-800 font-medium'
-                                  : 'bg-slate-100 text-slate-700'
-                              }`}>
+                              <span
+                                className={`px-1.5 py-0.5 rounded ${
+                                  vs.oxygenSaturation.value < 90
+                                    ? 'bg-red-100 text-red-800 font-bold'
+                                    : vs.oxygenSaturation.value <= 93
+                                    ? 'bg-amber-100 text-amber-800 font-medium'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
                                 {t('queue.spo2Label')}: {vs.oxygenSaturation.value}%
                               </span>
                             )}
@@ -425,12 +545,17 @@ export const QueueView: React.FC<QueueViewProps> = ({
                                 {t('queue.bpLabel')}: {t('queue.naShort')}
                               </span>
                             ) : (
-                              <span className={`px-1.5 py-0.5 rounded ${
-                                vs.systolicBP.value >= 160 || vs.systolicBP.value < 90
-                                  ? 'bg-red-100 text-red-800 font-bold'
-                                  : 'bg-slate-100 text-slate-700'
-                              }`}>
-                                {t('queue.bpLabel')}: {vs.systolicBP.value}/{vs.diastolicBP.value ?? '-'} mmHg
+                              <span
+                                className={`px-1.5 py-0.5 rounded ${
+                                  vs.systolicBP.value >= 190 || vs.systolicBP.value < 90
+                                    ? 'bg-red-100 text-red-800 font-bold'
+                                    : vs.systolicBP.value >= 160
+                                    ? 'bg-amber-100 text-amber-800 font-medium'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                {t('queue.bpLabel')}: {vs.systolicBP.value}/
+                                {vs.diastolicBP.value ?? '-'} mmHg
                               </span>
                             )}
 
@@ -440,24 +565,30 @@ export const QueueView: React.FC<QueueViewProps> = ({
                                 {t('queue.pulseLabel')}: {t('queue.naShort')}
                               </span>
                             ) : (
-                              <span className={`px-1.5 py-0.5 rounded ${
-                                vs.pulseRate.value >= 135 || vs.pulseRate.value <= 40
-                                  ? 'bg-red-100 text-red-800 font-bold'
-                                  : vs.pulseRate.value >= 105 || vs.pulseRate.value <= 50
-                                  ? 'bg-amber-100 text-amber-800 font-medium'
-                                  : 'bg-slate-100 text-slate-700'
-                              }`}>
+                              <span
+                                className={`px-1.5 py-0.5 rounded ${
+                                  vs.pulseRate.value >= 135 || vs.pulseRate.value <= 40
+                                    ? 'bg-red-100 text-red-800 font-bold'
+                                    : vs.pulseRate.value >= 105 || vs.pulseRate.value <= 50
+                                    ? 'bg-amber-100 text-amber-800 font-medium'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
                                 {t('queue.pulseLabel')}: {vs.pulseRate.value} bpm
                               </span>
                             )}
 
                             {/* Temp */}
                             {!vs.temperature.isUnavailable && vs.temperature.value !== null && (
-                              <span className={`px-1.5 py-0.5 rounded ${
-                                vs.temperature.value >= 38.3 || vs.temperature.value <= 35.0
-                                  ? 'bg-amber-100 text-amber-800 font-medium'
-                                  : 'bg-slate-100 text-slate-700'
-                              }`}>
+                              <span
+                                className={`px-1.5 py-0.5 rounded ${
+                                  vs.temperature.value >= 39.5
+                                    ? 'bg-red-100 text-red-800 font-bold'
+                                    : vs.temperature.value >= 38.3 || vs.temperature.value <= 35.0
+                                    ? 'bg-amber-100 text-amber-800 font-medium'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
                                 {vs.temperature.value}°C
                               </span>
                             )}
@@ -466,31 +597,49 @@ export const QueueView: React.FC<QueueViewProps> = ({
 
                         {/* 5. Care Status */}
                         <td className="py-3.5 px-4">
-                          <span className={`inline-block px-2 py-0.5 rounded-sm text-[11px] font-medium ${
-                            encounter.status === 'Completed'
-                              ? 'bg-slate-100 text-slate-600'
-                              : encounter.status === 'Under Clinical Review'
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : encounter.status === 'Reassessment Required'
-                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                              : 'bg-slate-100 text-slate-700'
-                          }`}>
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-sm text-[11px] font-medium ${
+                              encounter.status === 'Completed'
+                                ? 'bg-slate-100 text-slate-600'
+                                : encounter.status === 'Under Clinical Review'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : encounter.status === 'Reassessment Required'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
                             {localizedCareStatus}
                           </span>
                         </td>
 
-                        {/* 6. Action */}
+                        {/* 6. Action: Print Receipt + Details */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onSelectPatient(patient.id, encounter.id);
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
-                          >
-                            <span>{t('queue.detailsBtn')}</span>
-                            <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-                          </button>
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onPrintReceipt(patient.id, encounter.id);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
+                              title={t('patientDetail.printSlipBtn')}
+                            >
+                              <Printer className="w-3 h-3 shrink-0" />
+                              <span>{t('queue.printReceiptBtn')}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectPatient(patient.id, encounter.id);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
+                            >
+                              <span>{t('queue.detailsBtn')}</span>
+                              <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -500,12 +649,10 @@ export const QueueView: React.FC<QueueViewProps> = ({
             </div>
           </div>
 
-          {/* Mobile Responsive Cards (Matched to simplified fields) */}
+          {/* Mobile Responsive Cards */}
           <div className="lg:hidden space-y-3">
-            {sortedData.map(({ encounter, patient, assessment }) => {
+            {sortedData.map(({ encounter, patient, isHumanReview }) => {
               const isEmergency = encounter.priority === 'EMERGENCY';
-              const isUrgent = encounter.priority === 'URGENT';
-              const requiresHumanReview = assessment?.requiresHumanReview;
               const vs = encounter.vitalSigns;
 
               const genderShort =
@@ -527,21 +674,20 @@ export const QueueView: React.FC<QueueViewProps> = ({
                   <div className="flex items-start justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {isEmergency ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-800 border border-red-300">
-                          🔴 {t('priorities.EMERGENCY')}
-                        </span>
-                      ) : isUrgent ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-900 border border-amber-300">
-                          🟡 {t('priorities.URGENT')}
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-800 border border-red-300">
+                          <span className="w-2 h-2 rounded-full bg-red-600 shrink-0" />
+                          {t('priorities.EMERGENCY')}
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          🟢 {t('priorities.ROUTINE')}
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                          {t('priorities.ROUTINE')}
                         </span>
                       )}
 
-                      {requiresHumanReview && (
+                      {isHumanReview && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded">
+                          <AlertTriangle className="w-2.5 h-2.5 text-amber-700 shrink-0" />
                           {t('priorities.HUMAN_REVIEW')}
                         </span>
                       )}
@@ -550,10 +696,11 @@ export const QueueView: React.FC<QueueViewProps> = ({
 
                   <div className="mt-2">
                     <div className="text-sm font-semibold text-slate-900">
-                      {patient.fullName} ({patient.age}{t('queue.yearsShort')} / {genderShort})
+                      {patient.fullName} ({patient.age}
+                      {t('queue.yearsShort')} / {genderShort})
                     </div>
                     <div className="text-xs text-slate-500 font-mono mt-0.5">
-                      {patient.id} · {patient.village}
+                      {patient.id} · {encounter.receiptId} · {patient.village}
                     </div>
                   </div>
 
@@ -561,15 +708,23 @@ export const QueueView: React.FC<QueueViewProps> = ({
                   <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-[11px] font-mono">
                     <span className="text-slate-500">{t('queue.vitalsLabel')}</span>
                     {vs.oxygenSaturation.isUnavailable || vs.oxygenSaturation.value === null ? (
-                      <span className="text-amber-800">{t('queue.spo2Label')}: {t('queue.naShort')}</span>
+                      <span className="text-amber-800">
+                        {t('queue.spo2Label')}: {t('queue.naShort')}
+                      </span>
                     ) : (
-                      <span className={`${vs.oxygenSaturation.value < 90 ? 'text-red-700 font-bold' : 'text-slate-700'}`}>
+                      <span
+                        className={`${
+                          vs.oxygenSaturation.value < 90 ? 'text-red-700 font-bold' : 'text-slate-700'
+                        }`}
+                      >
                         {t('queue.spo2Label')} {vs.oxygenSaturation.value}%
                       </span>
                     )}
 
                     {vs.systolicBP.isUnavailable || vs.systolicBP.value === null ? (
-                      <span className="text-amber-800">{t('queue.bpLabel')}: {t('queue.naShort')}</span>
+                      <span className="text-amber-800">
+                        {t('queue.bpLabel')}: {t('queue.naShort')}
+                      </span>
                     ) : (
                       <span className="text-slate-700">
                         {t('queue.bpLabel')} {vs.systolicBP.value}/{vs.diastolicBP.value ?? '-'} mmHg
@@ -577,7 +732,9 @@ export const QueueView: React.FC<QueueViewProps> = ({
                     )}
 
                     {vs.pulseRate.isUnavailable || vs.pulseRate.value === null ? (
-                      <span className="text-amber-800">{t('queue.pulseLabel')}: {t('queue.naShort')}</span>
+                      <span className="text-amber-800">
+                        {t('queue.pulseLabel')}: {t('queue.naShort')}
+                      </span>
                     ) : (
                       <span className="text-slate-700">
                         {t('queue.pulseLabel')} {vs.pulseRate.value} bpm
@@ -587,11 +744,25 @@ export const QueueView: React.FC<QueueViewProps> = ({
 
                   <div className="mt-3 flex items-center justify-between text-xs pt-2 border-t border-slate-100">
                     <span className="text-slate-500 text-[11px]">
-                      {t('queue.statusPrefix')} <strong className="text-slate-800">{localizedCareStatus}</strong>
+                      {t('queue.statusPrefix')}{' '}
+                      <strong className="text-slate-800">{localizedCareStatus}</strong>
                     </span>
-                    <span className="text-blue-600 font-semibold flex items-center gap-0.5">
-                      {t('queue.detailsBtn')} <ChevronRight className="w-3.5 h-3.5" />
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onPrintReceipt(patient.id, encounter.id);
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded"
+                      >
+                        <Printer className="w-3 h-3" />
+                        <span>{t('queue.printReceiptBtn')}</span>
+                      </button>
+                      <span className="text-blue-600 font-semibold flex items-center gap-0.5">
+                        {t('queue.detailsBtn')} <ChevronRight className="w-3.5 h-3.5" />
+                      </span>
+                    </div>
                   </div>
                 </div>
               );

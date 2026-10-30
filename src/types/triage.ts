@@ -1,17 +1,38 @@
 /**
- * Types & Domain Models for AI Triage Assistant
+ * Types & Domain Models for XOR Triage
  * Protocol: IN-PHC-TRIAGE-v2.4-DEMO
+ * Two-Level Priority System (EMERGENCY | ROUTINE) + Separate AssessmentStatus
  */
 
-export type ClinicalPriority = 'EMERGENCY' | 'URGENT' | 'ROUTINE';
+export type TriagePriority = 'EMERGENCY' | 'ROUTINE';
+export type ClinicalPriority = TriagePriority;
 
-export type CareStatus = 
+export type AssessmentStatus = 'ASSESSED' | 'HUMAN_REVIEW_REQUIRED';
+
+export type RuleSeverity = 'EMERGENCY' | 'HUMAN_REVIEW_REQUIRED';
+
+export type CareStatus =
   | 'Awaiting Assessment'
   | 'Under Clinical Review'
   | 'Reassessment Required'
   | 'Completed';
 
-export type SyncStatus = 'Saved Locally' | 'Pending Sync' | 'Synced' | 'Sync Failed';
+export type SyncStatus =
+  | 'LOCAL_ONLY'
+  | 'PENDING_SYNC'
+  | 'SYNCED'
+  | 'SYNC_FAILED'
+  | 'Saved Locally'
+  | 'Pending Sync'
+  | 'Synced'
+  | 'Sync Failed';
+
+export type ReceiptPrintStatus =
+  | 'NOT_PRINTED'
+  | 'RECEIPT_GENERATED'
+  | 'PRINT_DIALOG_OPENED'
+  | 'PRINT_OUTCOME_UNKNOWN'
+  | 'PRINTED_CONFIRMED';
 
 export interface VitalMeasurement {
   value: number | null;
@@ -36,7 +57,7 @@ export interface TriggeredRule {
   ruleId: string;
   criterion: string;
   observedFinding: string;
-  severity: ClinicalPriority;
+  severity: RuleSeverity;
   category: 'Vitals' | 'Symptom' | 'Combination' | 'IncompleteData';
 }
 
@@ -45,7 +66,8 @@ export interface TriageAssessment {
   encounterId: string;
   patientId: string;
   version: number;
-  priority: ClinicalPriority;
+  priority: TriagePriority;
+  assessmentStatus: AssessmentStatus;
   triggeredRules: TriggeredRule[];
   explanation: string[];
   missingInformation: string[];
@@ -59,10 +81,11 @@ export interface TriageAssessment {
   acknowledgedAt?: string;
   acknowledgedBy?: string;
   acknowledgmentNotes?: string;
+  legacyPriorityFlag?: string;
   isOverridden?: boolean;
   overrideDetails?: {
-    originalPriority: ClinicalPriority;
-    overriddenPriority: ClinicalPriority;
+    originalPriority: TriagePriority;
+    overriddenPriority: TriagePriority;
     clinicianName: string;
     justification: string;
     timestamp: string;
@@ -88,6 +111,12 @@ export interface Patient {
 export interface Encounter {
   id: string;
   patientId: string;
+  receiptId: string;
+  arrivalTimestamp: string;
+  registeredAt: string;
+  receiptGeneratedAt: string;
+  receiptPrintStatus?: ReceiptPrintStatus;
+  lastPrintAttemptAt?: string;
   chiefComplaint: string;
   symptoms: string[];
   duration: string;
@@ -101,7 +130,8 @@ export interface Encounter {
   preferredLanguage?: SupportedLanguage;
   vitalSigns: VitalSigns;
   status: CareStatus;
-  priority: ClinicalPriority;
+  priority: TriagePriority;
+  assessmentStatus: AssessmentStatus;
   syncStatus: SyncStatus;
   currentAssessmentId: string;
   assessmentHistory: TriageAssessment[];

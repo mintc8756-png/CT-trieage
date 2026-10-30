@@ -28,6 +28,7 @@ interface PatientDetailViewProps {
   currentStaff: StaffProfile;
   auditLogs: AuditEvent[];
   onBack: () => void;
+  onOpenReceipt: () => void;
   onUpdateStatus: (newStatus: CareStatus) => void;
   onRecordReassessment: (newVitals: VitalSigns, newSymptoms: string[], updatedNotes: string) => void;
   onClinicianOverride: (newPriority: ClinicalPriority, justification: string) => void;
@@ -39,6 +40,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
   currentStaff,
   auditLogs,
   onBack,
+  onOpenReceipt,
   onUpdateStatus,
   onRecordReassessment,
   onClinicianOverride
@@ -88,16 +90,18 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
   );
   const [reassessNotes, setReassessNotes] = useState('');
 
-  // Clinician override modal state
+  // Clinician override modal state (Two-Level Priority: EMERGENCY | ROUTINE)
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [overridePriority, setOverridePriority] = useState<ClinicalPriority>(
-    encounter.priority === 'EMERGENCY' ? 'URGENT' : 'ROUTINE'
+    encounter.priority === 'EMERGENCY' ? 'ROUTINE' : 'EMERGENCY'
   );
   const [overrideJustification, setOverrideJustification] = useState('');
   const [overrideError, setOverrideError] = useState<string | null>(null);
 
   const isEmergency = encounter.priority === 'EMERGENCY';
-  const isUrgent = encounter.priority === 'URGENT';
+  const isHumanReviewRequired =
+    encounter.assessmentStatus === 'HUMAN_REVIEW_REQUIRED' ||
+    Boolean(currentAssessment?.requiresHumanReview);
 
   // Handle reassessment submission
   const handleExecuteReassessment = () => {
@@ -154,10 +158,6 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
     setShowOverrideModal(false);
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   const getPreferredLangLabel = (lang?: string) => {
     if (lang === 'hi') return t('registration.langHindi');
     if (lang === 'pa') return t('registration.langPunjabi');
@@ -168,6 +168,8 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
   const preferredLangText = getPreferredLangLabel(
     encounter.preferredLanguage || patient.preferredLanguage
   );
+
+  const hasMultipleVersions = encounter.assessmentHistory.length > 1;
 
   return (
     <div className="w-full space-y-5 pb-10">
@@ -181,7 +183,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
           <span>{t('patientDetail.backToQueue')}</span>
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Reassessment Action Button */}
           <button
             onClick={() => setShowReassessmentModal(true)}
@@ -195,6 +197,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
           <button
             onClick={() => {
               setOverrideError(null);
+              setOverridePriority(encounter.priority === 'EMERGENCY' ? 'ROUTINE' : 'EMERGENCY');
               setShowOverrideModal(true);
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 rounded-md text-xs font-semibold transition-colors cursor-pointer"
@@ -203,13 +206,17 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
             <span>{t('patientDetail.clinicianOverrideBtn')}</span>
           </button>
 
-          {/* Print slip */}
+          {/* Print Patient Receipt / Print Latest Receipt */}
           <button
-            onClick={handlePrint}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 rounded-md text-xs font-medium cursor-pointer"
+            onClick={onOpenReceipt}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white hover:bg-blue-700 rounded-md text-xs font-bold shadow-xs transition-colors cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>{t('patientDetail.printSlipBtn')}</span>
+            <span>
+              {hasMultipleVersions
+                ? t('patientDetail.printLatestReceiptBtn')
+                : t('patientDetail.printSlipBtn')}
+            </span>
           </button>
         </div>
       </div>
@@ -218,16 +225,23 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
       <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-slate-100 pb-4">
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 font-display">
                 {patient.fullName}
               </h1>
               <span className="font-mono text-xs font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
                 {patient.id}
               </span>
+              {encounter.receiptId && (
+                <span className="font-mono text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded">
+                  {encounter.receiptId}
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1 font-mono">
-              <span>{patient.age} {t('patientDetail.yearsLabel')}</span>
+              <span>
+                {patient.age} {t('patientDetail.yearsLabel')}
+              </span>
               <span>·</span>
               <span>{dict.gender[patient.gender] || patient.gender}</span>
               <span>·</span>
@@ -235,29 +249,34 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
               {patient.phone && (
                 <>
                   <span>·</span>
-                  <span>{t('patientDetail.phonePrefix')} {patient.phone}</span>
+                  <span>
+                    {t('patientDetail.phonePrefix')} {patient.phone}
+                  </span>
                 </>
               )}
             </div>
           </div>
 
-          {/* Priority & Care Status Controls */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Priority Badge */}
+          {/* Priority, Assessment Status & Care Status Controls */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Priority Badge (Two-Level: EMERGENCY or ROUTINE) */}
             {isEmergency ? (
               <div className="px-3 py-1.5 bg-red-100 text-red-800 border border-red-300 rounded-md text-xs font-bold flex items-center gap-1.5 shadow-xs">
                 <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
-                <span>🔴 {t('priorities.EMERGENCY')}</span>
-              </div>
-            ) : isUrgent ? (
-              <div className="px-3 py-1.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-md text-xs font-bold flex items-center gap-1.5 shadow-xs">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                <span>🟡 {t('priorities.URGENT')}</span>
+                <span>{t('priorities.EMERGENCY')}</span>
               </div>
             ) : (
               <div className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md text-xs font-bold flex items-center gap-1.5 shadow-xs">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
-                <span>🟢 {t('priorities.ROUTINE')}</span>
+                <span>{t('priorities.ROUTINE')}</span>
+              </div>
+            )}
+
+            {/* Separate Assessment Status Badge when HUMAN_REVIEW_REQUIRED */}
+            {isHumanReviewRequired && (
+              <div className="px-2.5 py-1.5 bg-amber-100 text-amber-950 border border-amber-300 rounded-md text-xs font-bold flex items-center gap-1.5 shadow-xs">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                <span>{t('priorities.HUMAN_REVIEW')}</span>
               </div>
             )}
 
@@ -278,6 +297,17 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
           </div>
         </div>
 
+        {/* Legacy Migration Notice if migrated from removed Urgent priority */}
+        {currentAssessment?.legacyPriorityFlag && (
+          <div className="bg-amber-50 border border-amber-300 rounded-md p-3 text-xs text-amber-950 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">{t('patientDetail.legacyUrgentNotice')}</p>
+              <p className="text-amber-800 mt-0.5">{currentAssessment.legacyPriorityFlag}</p>
+            </div>
+          </div>
+        )}
+
         {/* Override banner if applicable */}
         {currentAssessment?.isOverridden && currentAssessment.overrideDetails && (
           <div className="bg-amber-50 border border-amber-300 rounded-md p-3 text-xs text-amber-900">
@@ -288,39 +318,55 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
             <p className="mt-1 text-amber-950 font-sans">
               {t('patientDetail.overrideOriginal')}{' '}
               <strong className="font-mono">
-                {dict.priorities[currentAssessment.overrideDetails.originalPriority] || currentAssessment.overrideDetails.originalPriority}
+                {dict.priorities[currentAssessment.overrideDetails.originalPriority] ||
+                  currentAssessment.overrideDetails.originalPriority}
               </strong>{' '}
               ➔ {t('patientDetail.overrideNew')}{' '}
               <strong className="font-mono">
-                {dict.priorities[currentAssessment.overrideDetails.overriddenPriority] || currentAssessment.overrideDetails.overriddenPriority}
+                {dict.priorities[currentAssessment.overrideDetails.overriddenPriority] ||
+                  currentAssessment.overrideDetails.overriddenPriority}
               </strong>
             </p>
             <p className="mt-0.5 text-[11px] text-amber-800 italic">
-              "{t('patientDetail.overrideJustificationPrefix')} {currentAssessment.overrideDetails.justification}" — {currentAssessment.overrideDetails.clinicianName}
+              "{t('patientDetail.overrideJustificationPrefix')}{' '}
+              {currentAssessment.overrideDetails.justification}" —{' '}
+              {currentAssessment.overrideDetails.clinicianName}
             </p>
           </div>
         )}
 
         {/* Accompanying & Registration metadata */}
-        <div className={`grid grid-cols-1 ${preferredLangText ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3 text-xs text-slate-600 pt-1`}>
+        <div
+          className={`grid grid-cols-1 ${
+            preferredLangText ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+          } gap-3 text-xs text-slate-600 pt-1`}
+        >
           <div>
-            <span className="text-slate-400 block text-[11px]">{t('patientDetail.accompanyingPerson')}</span>
+            <span className="text-slate-400 block text-[11px]">
+              {t('patientDetail.accompanyingPerson')}
+            </span>
             <span className="font-medium text-slate-800">
               {patient.accompanyingPerson || t('patientDetail.noneSelf')}
             </span>
           </div>
           {preferredLangText && (
             <div>
-              <span className="text-slate-400 block text-[11px]">{t('patientDetail.preferredLangLabel')}</span>
+              <span className="text-slate-400 block text-[11px]">
+                {t('patientDetail.preferredLangLabel')}
+              </span>
               <span className="font-medium text-slate-800">{preferredLangText}</span>
             </div>
           )}
           <div>
-            <span className="text-slate-400 block text-[11px]">{t('patientDetail.registeredBy')}</span>
+            <span className="text-slate-400 block text-[11px]">
+              {t('patientDetail.registeredBy')}
+            </span>
             <span className="font-medium text-slate-800">{patient.registeredBy}</span>
           </div>
           <div>
-            <span className="text-slate-400 block text-[11px]">{t('patientDetail.intakeTimestamp')}</span>
+            <span className="text-slate-400 block text-[11px]">
+              {t('patientDetail.intakeTimestamp')}
+            </span>
             <span className="font-mono text-slate-800">
               {new Date(patient.registeredAt).toLocaleString()}
             </span>
@@ -360,23 +406,32 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                 {encounter.symptoms.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5 mt-1">
                     {encounter.symptoms.map((s, idx) => (
-                      <span key={idx} className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-xs font-medium">
+                      <span
+                        key={idx}
+                        className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-xs font-medium"
+                      >
                         {dict.symptomsList[s as keyof typeof dict.symptomsList] || s}
                       </span>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-slate-400 italic mt-0.5">{t('patientDetail.noSymptomsRecorded')}</p>
+                  <p className="text-slate-400 italic mt-0.5">
+                    {t('patientDetail.noSymptomsRecorded')}
+                  </p>
                 )}
               </div>
 
               <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
                 <div>
-                  <span className="text-slate-400 text-[11px]">{t('patientDetail.onsetLabel')}</span>
+                  <span className="text-slate-400 text-[11px]">
+                    {t('patientDetail.onsetLabel')}
+                  </span>
                   <p className="font-medium text-slate-800">{encounter.onset}</p>
                 </div>
                 <div>
-                  <span className="text-slate-400 text-[11px]">{t('patientDetail.durationLabel')}</span>
+                  <span className="text-slate-400 text-[11px]">
+                    {t('patientDetail.durationLabel')}
+                  </span>
                   <p className="font-medium text-slate-800">{encounter.duration}</p>
                 </div>
               </div>
@@ -430,7 +485,8 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                 {t('patientDetail.vitalsHeader')}
               </h2>
               <span className="text-[11px] text-slate-500 font-mono">
-                {t('patientDetail.assessedAtPrefix')} {new Date(encounter.vitalSigns.measuredAt).toLocaleTimeString()}
+                {t('patientDetail.assessedAtPrefix')}{' '}
+                {new Date(encounter.vitalSigns.measuredAt).toLocaleTimeString()}
               </span>
             </div>
 
@@ -446,9 +502,11 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {vitalStatuses.map((v, i) => {
-                    const translatedName = dict.vitalsNames[v.name as keyof typeof dict.vitalsNames] || v.name;
+                    const translatedName =
+                      dict.vitalsNames[v.name as keyof typeof dict.vitalsNames] || v.name;
                     const translatedNote = v.ruleNotes
-                      ? dict.vitalsNotes[v.ruleNotes as keyof typeof dict.vitalsNotes] || v.ruleNotes
+                      ? dict.vitalsNotes[v.ruleNotes as keyof typeof dict.vitalsNotes] ||
+                        v.ruleNotes
                       : undefined;
                     return (
                       <tr key={i} className="hover:bg-slate-50">
@@ -461,7 +519,9 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                           )}
                         </td>
                         <td className="py-2.5 px-2 font-mono font-semibold tabular-nums text-slate-900">
-                          {v.observed === 'UNAVAILABLE' ? t('patientDetail.statusUnavailable') : v.observed}
+                          {v.observed === 'UNAVAILABLE'
+                            ? t('patientDetail.statusUnavailable')
+                            : v.observed}
                         </td>
                         <td className="py-2.5 px-2 font-mono text-slate-500 tabular-nums">
                           {v.normalRange}
@@ -504,7 +564,9 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                   {t('patientDetail.cdsHeader')}
                 </h2>
                 <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                  {t('patientDetail.protocolPrefix')} {currentAssessment?.protocolId} ({currentAssessment?.protocolVersion}) · {t('patientDetail.versionPrefix')}{currentAssessment?.version}
+                  {t('patientDetail.protocolPrefix')} {currentAssessment?.protocolId} (
+                  {currentAssessment?.protocolVersion}) · {t('patientDetail.versionPrefix')}
+                  {currentAssessment?.version}
                 </p>
               </div>
               <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
@@ -513,26 +575,38 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
             </div>
 
             {/* Recommendation Priority Box */}
-            <div className={`p-4 rounded-lg border ${
-              isEmergency
-                ? 'bg-red-50/80 border-red-300 text-red-950'
-                : isUrgent
-                ? 'bg-amber-50/80 border-amber-300 text-amber-950'
-                : 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
-            }`}>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold tracking-tight uppercase">
-                  {t('patientDetail.recommendedPriority')}
-                </span>
-                <span className="font-mono font-bold text-base">
-                  {dict.priorities[encounter.priority] || encounter.priority}
+            <div
+              className={`p-4 rounded-lg border ${
+                isEmergency
+                  ? 'bg-red-50/80 border-red-300 text-red-950'
+                  : 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold tracking-tight uppercase">
+                    {t('patientDetail.recommendedPriority')}
+                  </span>
+                  <span className="font-mono font-bold text-base">
+                    {dict.priorities[encounter.priority] || encounter.priority}
+                  </span>
+                </div>
+                <span
+                  className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded border ${
+                    isHumanReviewRequired
+                      ? 'bg-amber-100 text-amber-950 border-amber-400'
+                      : 'bg-white/80 text-slate-700 border-slate-300'
+                  }`}
+                >
+                  {dict.assessmentStatus[encounter.assessmentStatus] ||
+                    encounter.assessmentStatus}
                 </span>
               </div>
-              <p className="text-xs mt-1 text-slate-700">
+              <p className="text-xs mt-1.5 text-slate-700">
                 {isEmergency
                   ? t('patientDetail.priorityDescEmergency')
-                  : isUrgent
-                  ? t('patientDetail.priorityDescUrgent')
+                  : isHumanReviewRequired
+                  ? t('patientDetail.priorityDescHumanReview')
                   : t('patientDetail.priorityDescRoutine')}
               </p>
             </div>
@@ -540,7 +614,9 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
             {/* Deterministic Triggered Rules */}
             <div className="space-y-2">
               <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                {t('patientDetail.ruleTracesHeader', { count: currentAssessment?.triggeredRules.length || 0 })}
+                {t('patientDetail.ruleTracesHeader', {
+                  count: currentAssessment?.triggeredRules.length || 0
+                })}
               </h3>
               {currentAssessment && currentAssessment.triggeredRules.length > 0 ? (
                 <div className="space-y-2">
@@ -553,13 +629,13 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                         <span className="font-mono font-bold text-[11px] text-blue-700">
                           {rule.ruleId}
                         </span>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-                          rule.severity === 'EMERGENCY'
-                            ? 'bg-red-100 text-red-800'
-                            : rule.severity === 'URGENT'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-emerald-100 text-emerald-800'
-                        }`}>
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                            rule.severity === 'EMERGENCY'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-amber-100 text-amber-900'
+                          }`}
+                        >
                           {dict.priorities[rule.severity] || rule.severity}
                         </span>
                       </div>
@@ -592,13 +668,13 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
             )}
 
             {/* Human Review / Missing Data Warnings */}
-            {currentAssessment?.requiresHumanReview && (
+            {isHumanReviewRequired && (
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 space-y-1">
                 <div className="flex items-center gap-1.5 font-bold">
                   <AlertTriangle className="w-4 h-4 text-amber-700" />
                   <span>{t('patientDetail.humanReviewBannerTitle')}</span>
                 </div>
-                <p>{currentAssessment.humanReviewReason}</p>
+                <p>{currentAssessment?.humanReviewReason}</p>
               </div>
             )}
 
@@ -611,7 +687,8 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                     {t('patientDetail.redFlagAckTitle')}
                   </p>
                   <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                    {t('patientDetail.byPrefix')} {currentAssessment.acknowledgedBy} · {new Date(currentAssessment.acknowledgedAt).toLocaleString()}
+                    {t('patientDetail.byPrefix')} {currentAssessment.acknowledgedBy} ·{' '}
+                    {new Date(currentAssessment.acknowledgedAt).toLocaleString()}
                   </p>
                   {currentAssessment.acknowledgmentNotes && (
                     <p className="text-[11px] text-slate-600 italic mt-0.5">
@@ -634,7 +711,9 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
               <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2 flex items-center gap-2">
                 <History className="w-4 h-4 text-blue-600" />
                 <span>
-                  {t('patientDetail.revisionTimelineHeader', { count: encounter.assessmentHistory.length })}
+                  {t('patientDetail.revisionTimelineHeader', {
+                    count: encounter.assessmentHistory.length
+                  })}
                 </span>
               </h2>
 
@@ -658,9 +737,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                     <p className="text-slate-600 text-[11px]">
                       {t('patientDetail.assessedByPrefix')} {asm.assessedBy}
                     </p>
-                    <p className="text-slate-700 text-xs italic">
-                      {asm.explanation[0]}
-                    </p>
+                    <p className="text-slate-700 text-xs italic">{asm.explanation[0]}</p>
                   </div>
                 ))}
               </div>
@@ -687,7 +764,10 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
           {auditLogs
             .filter(a => a.encounterId === encounter.id)
             .map((ev) => (
-              <div key={ev.id} className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div
+                key={ev.id}
+                className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+              >
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-slate-900">{ev.action}</span>
@@ -696,7 +776,9 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                   <p className="text-slate-600 mt-0.5 text-xs">{ev.details}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <span className="font-medium text-slate-800 block text-[11px]">{ev.actor}</span>
+                  <span className="font-medium text-slate-800 block text-[11px]">
+                    {ev.actor}
+                  </span>
                   <span className="text-slate-400 font-mono text-[10px]">
                     {new Date(ev.timestamp).toLocaleTimeString()}
                   </span>
@@ -720,7 +802,9 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                 </p>
               </div>
               <span className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-semibold">
-                {t('patientDetail.newVersionBadge', { version: encounter.assessmentHistory.length + 1 })}
+                {t('patientDetail.newVersionBadge', {
+                  version: encounter.assessmentHistory.length + 1
+                })}
               </span>
             </div>
 
@@ -887,7 +971,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
         </div>
       )}
 
-      {/* CLINICIAN OVERRIDE MODAL */}
+      {/* CLINICIAN OVERRIDE MODAL (Two-Level Priority: EMERGENCY | ROUTINE) */}
       {showOverrideModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
@@ -907,17 +991,15 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                   {t('patientDetail.targetPriorityLabel')}
                 </label>
                 <div className="flex items-center gap-2">
-                  {(['EMERGENCY', 'URGENT', 'ROUTINE'] as const).map((p) => (
+                  {(['EMERGENCY', 'ROUTINE'] as const).map((p) => (
                     <button
                       type="button"
                       key={p}
                       onClick={() => setOverridePriority(p)}
-                      className={`flex-1 py-1.5 px-2 rounded-md font-bold text-xs border transition-colors cursor-pointer ${
+                      className={`flex-1 py-2 px-3 rounded-md font-bold text-xs border transition-colors cursor-pointer ${
                         overridePriority === p
                           ? p === 'EMERGENCY'
                             ? 'bg-red-600 text-white border-red-600'
-                            : p === 'URGENT'
-                            ? 'bg-amber-600 text-white border-amber-600'
                             : 'bg-emerald-600 text-white border-emerald-600'
                           : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                       }`}
@@ -950,7 +1032,8 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
               </div>
 
               <div className="p-2.5 rounded bg-slate-50 border border-slate-200 text-[11px] text-slate-600">
-                <strong>{t('patientDetail.clinicianSignatureLabel')}</strong> {currentStaff.name} ({dict.staffRoles[currentStaff.role] || currentStaff.role})
+                <strong>{t('patientDetail.clinicianSignatureLabel')}</strong> {currentStaff.name} (
+                {dict.staffRoles[currentStaff.role] || currentStaff.role})
               </div>
             </div>
 

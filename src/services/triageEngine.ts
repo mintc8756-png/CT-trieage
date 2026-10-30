@@ -1,11 +1,13 @@
 /**
  * Clinical Triage Engine — Protocol IN-PHC-TRIAGE-v2.4-DEMO
- * Fully transparent, deterministic clinical decision support for Rural Primary Health Centres.
+ * Two-Level Priority System (EMERGENCY | ROUTINE) with separate AssessmentStatus (ASSESSED | HUMAN_REVIEW_REQUIRED)
  */
 
 import {
   VitalSigns,
-  ClinicalPriority,
+  TriagePriority,
+  AssessmentStatus,
+  RuleSeverity,
   TriggeredRule,
   TriageAssessment
 } from '../types/triage';
@@ -14,6 +16,9 @@ export const PROTOCOL_ID = 'IN-PHC-TRIAGE';
 export const PROTOCOL_VERSION = 'v2.4-DEMO';
 export const CLINICAL_DISCLAIMER =
   'This is a decision-support recommendation, not a diagnosis. A qualified clinician must assess the patient.';
+
+export const RECEIPT_DISCLAIMER =
+  'This document contains initial registration and triage information. It is not a diagnosis or a substitute for clinical examination.';
 
 export interface AssessmentInput {
   encounterId: string;
@@ -32,7 +37,7 @@ export interface VitalStatus {
   observed: string;
   normalRange: string;
   status: 'NORMAL' | 'ABNORMAL' | 'CRITICAL' | 'MISSING';
-  severityLevel: ClinicalPriority | 'NORMAL' | 'MISSING';
+  severityLevel: RuleSeverity | 'NORMAL' | 'MISSING';
   ruleNotes?: string;
 }
 
@@ -69,7 +74,7 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
         observed: `${val}%`,
         normalRange: '95% – 100%',
         status: 'ABNORMAL',
-        severityLevel: 'URGENT',
+        severityLevel: 'HUMAN_REVIEW_REQUIRED',
         ruleNotes: 'Moderate hypoxemia (90–93%)'
       });
     } else {
@@ -120,7 +125,7 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
         observed: `${sbp}/${dbp} mmHg`,
         normalRange: '100–139 / 60–89 mmHg',
         status: 'ABNORMAL',
-        severityLevel: 'URGENT',
+        severityLevel: 'HUMAN_REVIEW_REQUIRED',
         ruleNotes: 'Stage 2 severe hypertension'
       });
     } else if (sbp < 100) {
@@ -129,7 +134,7 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
         observed: `${sbp}/${dbp} mmHg`,
         normalRange: '100–139 / 60–89 mmHg',
         status: 'ABNORMAL',
-        severityLevel: 'URGENT',
+        severityLevel: 'HUMAN_REVIEW_REQUIRED',
         ruleNotes: 'Borderline low systolic pressure'
       });
     } else {
@@ -170,7 +175,7 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
         observed: `${hr} bpm`,
         normalRange: '60 – 100 bpm',
         status: 'ABNORMAL',
-        severityLevel: 'URGENT',
+        severityLevel: 'HUMAN_REVIEW_REQUIRED',
         ruleNotes: 'Tachycardia (105–134) or Bradycardia (41–50)'
       });
     } else {
@@ -211,7 +216,7 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
         observed: `${rr} breaths/min`,
         normalRange: '12 – 20 breaths/min',
         status: 'ABNORMAL',
-        severityLevel: 'URGENT',
+        severityLevel: 'HUMAN_REVIEW_REQUIRED',
         ruleNotes: 'Tachypnea (22–29 breaths/min)'
       });
     } else {
@@ -244,7 +249,7 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
         observed: `${temp}°C (${tempF}°F)`,
         normalRange: '36.5°C – 37.5°C',
         status: 'CRITICAL',
-        severityLevel: 'URGENT',
+        severityLevel: 'HUMAN_REVIEW_REQUIRED',
         ruleNotes: 'Hyperpyrexia (≥39.5°C / 103.1°F)'
       });
     } else if (temp >= 38.3) {
@@ -253,7 +258,7 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
         observed: `${temp}°C (${tempF}°F)`,
         normalRange: '36.5°C – 37.5°C',
         status: 'ABNORMAL',
-        severityLevel: 'URGENT',
+        severityLevel: 'HUMAN_REVIEW_REQUIRED',
         ruleNotes: 'High fever (≥38.3°C / 101.0°F)'
       });
     } else if (temp <= 35.0) {
@@ -262,7 +267,7 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
         observed: `${temp}°C (${tempF}°F)`,
         normalRange: '36.5°C – 37.5°C',
         status: 'CRITICAL',
-        severityLevel: 'URGENT',
+        severityLevel: 'HUMAN_REVIEW_REQUIRED',
         ruleNotes: 'Hypothermia (≤35.0°C / 95.0°F)'
       });
     } else {
@@ -280,7 +285,8 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
 }
 
 /**
- * Main Deterministic Triage Engine Execution
+ * Main Deterministic Two-Level Triage Engine Execution
+ * Returns TriagePriority ('EMERGENCY' | 'ROUTINE') + AssessmentStatus ('ASSESSED' | 'HUMAN_REVIEW_REQUIRED')
  */
 export function evaluateTriage(input: AssessmentInput): TriageAssessment {
   const {
@@ -298,8 +304,7 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
   const explanations: string[] = [];
   const missingInformation: string[] = [];
   const safetyWarnings: string[] = [];
-  let requiresHumanReview = false;
-  let humanReviewReason = '';
+  const humanReviewReasons: string[] = [];
 
   const vs = vitalSigns;
 
@@ -320,7 +325,7 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
     missingInformation.push('Respiratory Rate');
   }
 
-  // 2. Critical Vitals Evaluation
+  // 2. Critical & Borderline Vitals Evaluation
   // SpO2
   if (!vs.oxygenSaturation.isUnavailable && vs.oxygenSaturation.value !== null) {
     const spo2 = vs.oxygenSaturation.value;
@@ -335,13 +340,15 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
       explanations.push(`Critical hypoxemia: SpO₂ is ${spo2}% (<90%). Immediate supplemental oxygen therapy and doctor review required.`);
     } else if (spo2 <= 93) {
       triggeredRules.push({
-        ruleId: 'V-SPO2-URGENT',
+        ruleId: 'V-SPO2-REVIEW',
         criterion: 'SpO₂ 90–93% (Moderate hypoxemia)',
         observedFinding: `SpO₂ recorded at ${spo2}%`,
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      explanations.push(`Moderate hypoxemia: SpO₂ is ${spo2}%. Clinical review needed within 30 minutes.`);
+      const reason = `Moderate hypoxemia: SpO₂ is ${spo2}% (90–93%). Cannot be safely classified as standard Routine without clinical verification.`;
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
     }
   }
 
@@ -369,13 +376,26 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
       explanations.push(`Severe hypotension: SBP ${sbp} mmHg (<90 mmHg) suggests hemodynamic shock.`);
     } else if (sbp >= 160 || dbp >= 100) {
       triggeredRules.push({
-        ruleId: 'V-BP-URGENT-HIGH',
+        ruleId: 'V-BP-REVIEW-HIGH',
         criterion: 'Systolic BP 160–189 mmHg or Diastolic 100–119 mmHg',
         observedFinding: `BP is ${sbp}/${dbp} mmHg`,
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      explanations.push(`Stage 2 severe hypertension: BP ${sbp}/${dbp} mmHg requires medical review.`);
+      const reason = `Stage 2 severe hypertension: BP ${sbp}/${dbp} mmHg requires clinical evaluation.`;
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
+    } else if (sbp < 100) {
+      triggeredRules.push({
+        ruleId: 'V-BP-REVIEW-LOW',
+        criterion: 'Borderline low Systolic BP (90–99 mmHg)',
+        observedFinding: `BP is ${sbp}/${dbp} mmHg`,
+        severity: 'HUMAN_REVIEW_REQUIRED',
+        category: 'Vitals'
+      });
+      const reason = `Borderline low systolic pressure (${sbp} mmHg) requires clinical review.`;
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
     }
   }
 
@@ -390,16 +410,18 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
         severity: 'EMERGENCY',
         category: 'Vitals'
       });
-      explanations.push(`Extreme tachycardia/bradycardia: Heart rate ${hr} bpm requires urgent ECG and stabilization.`);
+      explanations.push(`Extreme tachycardia/bradycardia: Heart rate ${hr} bpm requires immediate ECG and stabilization.`);
     } else if (hr >= 105 || hr <= 50) {
       triggeredRules.push({
-        ruleId: 'V-HR-URGENT',
+        ruleId: 'V-HR-REVIEW',
         criterion: 'Pulse 105–134 bpm or 41–50 bpm',
         observedFinding: `Pulse is ${hr} bpm`,
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      explanations.push(`Abnormal pulse rate: ${hr} bpm warrants medical assessment.`);
+      const reason = `Abnormal pulse rate (${hr} bpm) requires clinician verification.`;
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
     }
   }
 
@@ -416,13 +438,15 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
       explanations.push(`Critical respiratory compromise: ${rr} breaths/min indicates imminent respiratory exhaustion.`);
     } else if (rr >= 22) {
       triggeredRules.push({
-        ruleId: 'V-RR-URGENT',
+        ruleId: 'V-RR-REVIEW',
         criterion: 'Respiratory Rate 22–29 breaths/min',
         observedFinding: `Respiratory rate is ${rr} breaths/min`,
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      explanations.push(`Tachypnea: ${rr} breaths/min requires clinical evaluation.`);
+      const reason = `Tachypnea (${rr} breaths/min) requires clinical evaluation.`;
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
     }
   }
 
@@ -431,22 +455,37 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
     const temp = vs.temperature.value;
     if (temp >= 39.5) {
       triggeredRules.push({
-        ruleId: 'V-TEMP-URGENT-HIGH',
+        ruleId: 'V-TEMP-REVIEW-HIGH',
         criterion: 'Body Temperature ≥ 39.5°C (103.1°F)',
         observedFinding: `Temperature is ${temp}°C`,
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      explanations.push(`High fever (Hyperpyrexia): ${temp}°C. Physician review within 30 minutes recommended.`);
+      const reason = `Hyperpyrexia (${temp}°C) requires direct clinician review.`;
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
+    } else if (temp >= 38.3) {
+      triggeredRules.push({
+        ruleId: 'V-TEMP-REVIEW-FEVER',
+        criterion: 'High Fever (38.3°C – 39.4°C)',
+        observedFinding: `Temperature is ${temp}°C`,
+        severity: 'HUMAN_REVIEW_REQUIRED',
+        category: 'Vitals'
+      });
+      const reason = `High fever (${temp}°C) flagged for clinician review.`;
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
     } else if (temp <= 35.0) {
       triggeredRules.push({
-        ruleId: 'V-TEMP-URGENT-LOW',
+        ruleId: 'V-TEMP-REVIEW-LOW',
         criterion: 'Body Temperature ≤ 35.0°C (Hypothermia)',
         observedFinding: `Temperature is ${temp}°C`,
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      explanations.push(`Hypothermia: ${temp}°C requires warming and monitoring.`);
+      const reason = `Hypothermia (${temp}°C) requires warming and clinician review.`;
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
     }
   }
 
@@ -456,12 +495,15 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
     textCorpus.includes('chest pain') ||
     textCorpus.includes('angina') ||
     textCorpus.includes('heart pain') ||
-    textCorpus.includes('छाती में दर्द');
+    textCorpus.includes('छाती में दर्द') ||
+    textCorpus.includes('ਛਾਤੀ ਵਿੱਚ ਦਰਦ');
   const hasSevereBreathing =
     textCorpus.includes('breathless') ||
     textCorpus.includes('dyspnea') ||
     textCorpus.includes('stridor') ||
+    textCorpus.includes('shortness of breath') ||
     textCorpus.includes('सांस लेने में तकलीफ') ||
+    textCorpus.includes('ਸਾਹ ਲੈਣ ਵਿੱਚ ਤਕਲੀਫ਼') ||
     textCorpus.includes('gasping');
 
   if (hasChestPain) {
@@ -486,13 +528,15 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
       explanations.push('Immediate acute coronary syndrome protocol indicated due to severe radiating chest pain with diaphoresis.');
     } else {
       triggeredRules.push({
-        ruleId: 'SYMP-CHEST-URGENT',
+        ruleId: 'SYMP-CHEST-REVIEW',
         criterion: 'Acute chest pain presented',
         observedFinding: 'Chest pain reported',
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Symptom'
       });
-      explanations.push('Acute chest discomfort requires rapid ECG and Medical Officer assessment.');
+      const reason = 'Acute chest discomfort requires rapid ECG and Medical Officer verification.';
+      explanations.push(reason);
+      humanReviewReasons.push(reason);
     }
   }
 
@@ -512,6 +556,7 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
     textCorpus.includes('convulsion') ||
     textCorpus.includes('seizure') ||
     textCorpus.includes('unconscious') ||
+    textCorpus.includes('loss of consciousness') ||
     textCorpus.includes('snake bite') ||
     textCorpus.includes('severe bleeding') ||
     textCorpus.includes('head trauma')
@@ -527,43 +572,50 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
   }
 
   // 4. Missing Data Safeguard
-  // If multiple critical vitals are unavailable, or BP + Pulse are unmeasured
-  const criticalVitalsMissing =
-    (missingInformation.includes('Blood Pressure') && missingInformation.includes('Pulse Rate')) ||
+  // Any missing critical vital (SpO2, BP, Pulse, RR) or >= 2 missing vitals requires human review
+  const hasMissingCriticalVitals =
+    missingInformation.includes('Blood Pressure') ||
+    missingInformation.includes('Oxygen Saturation (SpO₂)') ||
+    missingInformation.includes('Pulse Rate') ||
+    missingInformation.includes('Respiratory Rate') ||
     missingInformation.length >= 2;
 
-  if (criticalVitalsMissing) {
-    requiresHumanReview = true;
-    humanReviewReason = `Critical vitals are unavailable (${missingInformation.join(', ')}). Patient cannot be triaged as Routine based on incomplete records.`;
-    safetyWarnings.push(humanReviewReason);
+  if (hasMissingCriticalVitals) {
+    const missingMsg = `Critical vital signs are unavailable (${missingInformation.join(', ')}). Assessment cannot be completed safely as normal Routine without clinician review.`;
+    humanReviewReasons.push(missingMsg);
+    safetyWarnings.push(missingMsg);
 
-    // Apply conservative escalation if no existing Emergency rule was triggered
     if (!triggeredRules.some(r => r.severity === 'EMERGENCY')) {
       triggeredRules.push({
         ruleId: 'SAFETY-INCOMPLETE-DATA',
-        criterion: 'Multiple critical vitals unavailable in presenting patient',
+        criterion: 'Critical vital signs unavailable at intake',
         observedFinding: `Missing parameters: ${missingInformation.join(', ')}`,
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'IncompleteData'
       });
-      explanations.push('Conservative safety escalation: Missing vital signs prevent routine classification. In-person clinical assessment required.');
+      explanations.push('Conservative safety safeguard: Missing vital signs prevent unreviewed Routine classification. Direct clinician review required.');
     }
   }
 
-  // 5. Final Priority Determination
-  let suggestedPriority: ClinicalPriority = 'ROUTINE';
-  if (triggeredRules.some(r => r.severity === 'EMERGENCY')) {
-    suggestedPriority = 'EMERGENCY';
-  } else if (triggeredRules.some(r => r.severity === 'URGENT')) {
-    suggestedPriority = 'URGENT';
-  } else {
-    suggestedPriority = 'ROUTINE';
-    explanations.push('All recorded vital signs within standard reference intervals. No red-flag criteria met.');
+  // 5. Final Two-Level Priority & AssessmentStatus Determination
+  const hasEmergencyRule = triggeredRules.some(r => r.severity === 'EMERGENCY');
+  const hasHumanReviewRule =
+    triggeredRules.some(r => r.severity === 'HUMAN_REVIEW_REQUIRED') ||
+    humanReviewReasons.length > 0;
+
+  let suggestedPriority: TriagePriority = hasEmergencyRule ? 'EMERGENCY' : 'ROUTINE';
+  let assessmentStatus: AssessmentStatus =
+    !hasEmergencyRule && hasHumanReviewRule ? 'HUMAN_REVIEW_REQUIRED' : 'ASSESSED';
+  let requiresHumanReview = assessmentStatus === 'HUMAN_REVIEW_REQUIRED' || hasMissingCriticalVitals;
+
+  if (!hasEmergencyRule && !hasHumanReviewRule) {
+    explanations.push('All recorded vital signs within standard reference intervals. No emergency red-flag criteria met.');
   }
 
   // 6. Safety Guardrail: Prevent automatic downgrading of emergency patients
   if (previousAssessment && previousAssessment.priority === 'EMERGENCY' && suggestedPriority !== 'EMERGENCY') {
     suggestedPriority = 'EMERGENCY';
+    assessmentStatus = 'ASSESSED';
     safetyWarnings.push('Automatic downgrade blocked: Patient was previously designated EMERGENCY. Downgrade requires explicit registered clinician override.');
     triggeredRules.push({
       ruleId: 'SAFETY-NO-AUTO-DOWNGRADE',
@@ -574,17 +626,21 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
     });
   }
 
+  const combinedHumanReviewReason =
+    humanReviewReasons.length > 0 ? humanReviewReasons.join(' ') : undefined;
+
   return {
     id: 'ASM-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
     encounterId,
     patientId,
     version: previousAssessment ? previousAssessment.version + 1 : 1,
     priority: suggestedPriority,
+    assessmentStatus,
     triggeredRules,
     explanation: explanations,
     missingInformation,
     requiresHumanReview,
-    humanReviewReason: requiresHumanReview ? humanReviewReason : undefined,
+    humanReviewReason: requiresHumanReview ? combinedHumanReviewReason : undefined,
     safetyWarnings,
     protocolId: PROTOCOL_ID,
     protocolVersion: PROTOCOL_VERSION,

@@ -1,6 +1,6 @@
 /**
  * Pre-loaded Canonical Clinical Demonstration Scenarios
- * Protocol IN-PHC-TRIAGE-v2.4-DEMO
+ * Protocol IN-PHC-TRIAGE-v2.4-DEMO (Two-Level Priority System: EMERGENCY | ROUTINE + HUMAN_REVIEW_REQUIRED)
  */
 
 import { Patient, Encounter, TriageAssessment, AuditEvent, StaffProfile } from '../types/triage';
@@ -109,6 +109,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     patientId: 'PHC-2026-0101',
     version: 1,
     priority: 'EMERGENCY',
+    assessmentStatus: 'ASSESSED',
     triggeredRules: [
       {
         ruleId: 'V-SPO2-EMERGENCY',
@@ -150,35 +151,37 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     acknowledgmentNotes: 'Oxygen administered @ 4L/min via nasal cannula. Medical Officer Dr. Sharma notified in OPD Room 1.'
   },
 
-  // Assessment 2: Priya Patel (URGENT)
+  // Assessment 2: Priya Patel (ROUTINE + HUMAN_REVIEW_REQUIRED due to Hyperpyrexia 39.6°C & Tachycardia 118 bpm)
   {
     id: 'ASM-0102-1',
     encounterId: 'ENC-2026-0102',
     patientId: 'PHC-2026-0102',
     version: 1,
-    priority: 'URGENT',
+    priority: 'ROUTINE',
+    assessmentStatus: 'HUMAN_REVIEW_REQUIRED',
     triggeredRules: [
       {
-        ruleId: 'V-TEMP-URGENT-HIGH',
+        ruleId: 'V-TEMP-REVIEW-HIGH',
         criterion: 'Body Temperature ≥ 39.5°C (103.1°F)',
         observedFinding: 'Temperature recorded at 39.6°C (103.3°F)',
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       },
       {
-        ruleId: 'V-HR-URGENT',
+        ruleId: 'V-HR-REVIEW',
         criterion: 'Pulse 105–134 bpm',
         observedFinding: 'Pulse recorded at 118 bpm',
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       }
     ],
     explanation: [
       'High fever (Hyperpyrexia): 39.6°C with tachycardia (118 bpm) and persistent rigors.',
-      'Physician review within 30 minutes recommended to screen for malaria, typhoid, or acute bacteremia.'
+      'Flagged for direct Medical Officer clinical review to screen for malaria, typhoid, or acute bacteremia.'
     ],
     missingInformation: [],
-    requiresHumanReview: false,
+    requiresHumanReview: true,
+    humanReviewReason: 'Abnormal physiological parameters (Temp 39.6°C, Pulse 118 bpm) require direct clinician verification.',
     safetyWarnings: [],
     protocolId: 'IN-PHC-TRIAGE',
     protocolVersion: 'v2.4-DEMO',
@@ -186,13 +189,14 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     assessedBy: 'Sister Sunita Devi (ANM)'
   },
 
-  // Assessment 3: Anil Sharma (ROUTINE)
+  // Assessment 3: Anil Sharma (ROUTINE · ASSESSED)
   {
     id: 'ASM-0103-1',
     encounterId: 'ENC-2026-0103',
     patientId: 'PHC-2026-0103',
     version: 1,
     priority: 'ROUTINE',
+    assessmentStatus: 'ASSESSED',
     triggeredRules: [],
     explanation: [
       'All recorded vital signs within standard reference intervals.',
@@ -214,6 +218,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     patientId: 'PHC-2026-0104',
     version: 1,
     priority: 'EMERGENCY',
+    assessmentStatus: 'ASSESSED',
     triggeredRules: [
       {
         ruleId: 'V-SPO2-EMERGENCY',
@@ -255,29 +260,30 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     acknowledgmentNotes: 'High-flow face mask oxygen initiated. Medical Officer Dr. Sharma rushed to casualty bed.'
   },
 
-  // Assessment 5: Sunil Verma (URGENT - Human Review Required due to missing vitals)
+  // Assessment 5: Sunil Verma (ROUTINE + HUMAN_REVIEW_REQUIRED due to missing vitals)
   {
     id: 'ASM-0105-1',
     encounterId: 'ENC-2026-0105',
     patientId: 'PHC-2026-0105',
     version: 1,
-    priority: 'URGENT',
+    priority: 'ROUTINE',
+    assessmentStatus: 'HUMAN_REVIEW_REQUIRED',
     triggeredRules: [
       {
         ruleId: 'SAFETY-INCOMPLETE-DATA',
-        criterion: 'Multiple critical vitals unavailable in presenting patient',
+        criterion: 'Critical vital signs unavailable at intake',
         observedFinding: 'Missing parameters: Blood Pressure, Pulse Rate',
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'IncompleteData'
       }
     ],
     explanation: [
-      'Conservative safety escalation: Blood Pressure and Pulse Rate could not be palpatated or recorded at intake.',
-      'Missing vital signs safeguard prevents classifying acutely vomiting/dizzy patient as Routine.'
+      'Conservative safety safeguard: Blood Pressure and Pulse Rate could not be palpated or recorded at intake.',
+      'Missing vital signs safeguard flags this patient as HUMAN REVIEW REQUIRED so they are not silently treated as a normal Routine case.'
     ],
     missingInformation: ['Blood Pressure', 'Pulse Rate'],
     requiresHumanReview: true,
-    humanReviewReason: 'Critical vitals are unavailable (Blood Pressure, Pulse Rate). Patient cannot be triaged as Routine based on incomplete records.',
+    humanReviewReason: 'Critical vitals are unavailable (Blood Pressure, Pulse Rate). Assessment cannot be completed safely without qualified clinical review.',
     safetyWarnings: [
       'Human Review Required: Immediate manual palpation or Doppler assessment needed to rule out hypovolemic shock.'
     ],
@@ -294,6 +300,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     patientId: 'PHC-2026-0106',
     version: 1,
     priority: 'ROUTINE',
+    assessmentStatus: 'ASSESSED',
     triggeredRules: [],
     explanation: [
       'Initial presentation: Mild low-grade fever with bodily aches.',
@@ -315,6 +322,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     patientId: 'PHC-2026-0106',
     version: 2,
     priority: 'EMERGENCY',
+    assessmentStatus: 'ASSESSED',
     triggeredRules: [
       {
         ruleId: 'V-SPO2-EMERGENCY',
@@ -324,10 +332,10 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
         category: 'Vitals'
       },
       {
-        ruleId: 'V-RR-URGENT',
+        ruleId: 'V-RR-REVIEW',
         criterion: 'Respiratory Rate 22–29 breaths/min',
         observedFinding: 'Respiratory rate accelerated to 28 breaths/min',
-        severity: 'URGENT',
+        severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       }
     ],
@@ -355,12 +363,17 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
   {
     id: 'ENC-2026-0101',
     patientId: 'PHC-2026-0101',
+    receiptId: 'RCP-2026-0101',
+    arrivalTimestamp: new Date(Date.now() - 50 * 60 * 1000).toISOString(),
+    registeredAt: new Date(Date.now() - 48 * 60 * 1000).toISOString(),
+    receiptGeneratedAt: new Date(Date.now() - 47 * 60 * 1000).toISOString(),
+    receiptPrintStatus: 'PRINTED_CONFIRMED',
     chiefComplaint: 'Chest pain & shortness of breath',
-    symptoms: ['Chest Pain', 'Shortness of Breath', 'Cold Sweats', 'Left Arm Numbness'],
+    symptoms: ['Chest Pain', 'Shortness of Breath', 'Cold Sweats / Diaphoresis', 'Left Arm Radiation'],
     duration: '2 hours',
-    onset: 'Acute, sudden onset while working in field',
+    onset: 'Sudden (within minutes/hours)',
     severity: 'Severe',
-    medicalHistory: ['Hypertension (3 years, on Amlodipine 5mg)', 'Smoker'],
+    medicalHistory: ['Hypertension'],
     currentMedications: 'Tab Amlodipine 5mg OD',
     allergies: 'None known',
     clinicalNotes: 'Profuse cold diaphoresis. Patient clutching chest. Immediate ECG required.',
@@ -376,7 +389,8 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
     },
     status: 'Under Clinical Review',
     priority: 'EMERGENCY',
-    syncStatus: 'Synced',
+    assessmentStatus: 'ASSESSED',
+    syncStatus: 'SYNCED',
     currentAssessmentId: 'ASM-0101-1',
     assessmentHistory: [CANONICAL_ASSESSMENTS[0]],
     createdAt: new Date(Date.now() - 48 * 60 * 1000).toISOString(),
@@ -387,12 +401,17 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
   {
     id: 'ENC-2026-0102',
     patientId: 'PHC-2026-0102',
+    receiptId: 'RCP-2026-0102',
+    arrivalTimestamp: new Date(Date.now() - 35 * 60 * 1000).toISOString(),
+    registeredAt: new Date(Date.now() - 32 * 60 * 1000).toISOString(),
+    receiptGeneratedAt: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
+    receiptPrintStatus: 'RECEIPT_GENERATED',
     chiefComplaint: 'High fever with rigors',
-    symptoms: ['High Fever', 'Chills & Rigors', 'Headache', 'Body Aches'],
+    symptoms: ['High Fever', 'Chills & Rigors', 'Severe Headache'],
     duration: '3 days',
-    onset: 'Gradual onset, worsening spiking chills in evening',
+    onset: 'Gradual (over several days)',
     severity: 'Moderate',
-    medicalHistory: ['No prior chronic illness'],
+    medicalHistory: [],
     currentMedications: 'Occasional paracetamol 500mg taken at home',
     allergies: 'Sulfa drugs (rash)',
     clinicalNotes: 'Flushed face, shivering. Advised rapid malaria test & CBC.',
@@ -407,8 +426,9 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
       measuredBy: 'Sister Sunita Devi (ANM)'
     },
     status: 'Awaiting Assessment',
-    priority: 'URGENT',
-    syncStatus: 'Synced',
+    priority: 'ROUTINE',
+    assessmentStatus: 'HUMAN_REVIEW_REQUIRED',
+    syncStatus: 'SYNCED',
     currentAssessmentId: 'ASM-0102-1',
     assessmentHistory: [CANONICAL_ASSESSMENTS[1]],
     createdAt: new Date(Date.now() - 32 * 60 * 1000).toISOString(),
@@ -419,12 +439,17 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
   {
     id: 'ENC-2026-0103',
     patientId: 'PHC-2026-0103',
+    receiptId: 'RCP-2026-0103',
+    arrivalTimestamp: new Date(Date.now() - 68 * 60 * 1000).toISOString(),
+    registeredAt: new Date(Date.now() - 65 * 60 * 1000).toISOString(),
+    receiptGeneratedAt: new Date(Date.now() - 64 * 60 * 1000).toISOString(),
+    receiptPrintStatus: 'PRINTED_CONFIRMED',
     chiefComplaint: 'Mild cough and cold',
-    symptoms: ['Cough', 'Runny Nose', 'Sore Throat'],
+    symptoms: ['Cough'],
     duration: '5 days',
-    onset: 'Mild onset after exposure to rain',
+    onset: 'Gradual (over several days)',
     severity: 'Mild',
-    medicalHistory: ['None'],
+    medicalHistory: [],
     currentMedications: 'None',
     allergies: 'None',
     clinicalNotes: 'Throat mildly erythematous. Chest clear on auscultation.',
@@ -440,7 +465,8 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
     },
     status: 'Awaiting Assessment',
     priority: 'ROUTINE',
-    syncStatus: 'Synced',
+    assessmentStatus: 'ASSESSED',
+    syncStatus: 'SYNCED',
     currentAssessmentId: 'ASM-0103-1',
     assessmentHistory: [CANONICAL_ASSESSMENTS[2]],
     createdAt: new Date(Date.now() - 65 * 60 * 1000).toISOString(),
@@ -451,12 +477,17 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
   {
     id: 'ENC-2026-0104',
     patientId: 'PHC-2026-0104',
+    receiptId: 'RCP-2026-0104',
+    arrivalTimestamp: new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+    registeredAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+    receiptGeneratedAt: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
+    receiptPrintStatus: 'RECEIPT_GENERATED',
     chiefComplaint: 'Severe breathlessness and audible stridor',
-    symptoms: ['Severe Breathlessness', 'Audible Stridor', 'Inability to speak full sentences'],
+    symptoms: ['Shortness of Breath', 'Audible Stridor'],
     duration: '4 hours',
-    onset: 'Acute exacerbation following kitchen biomass smoke exposure',
+    onset: 'Sudden (within minutes/hours)',
     severity: 'Severe',
-    medicalHistory: ['Chronic Obstructive Pulmonary Disease (COPD / Asthmatic Bronchitis)'],
+    medicalHistory: ['COPD / Asthma'],
     currentMedications: 'Inhaler Salbutamol SOS (lost inhaler 1 month ago)',
     allergies: 'None reported',
     clinicalNotes: 'Marked suprasternal and intercostal retractions. Central cyanosis noted around lips.',
@@ -472,7 +503,8 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
     },
     status: 'Under Clinical Review',
     priority: 'EMERGENCY',
-    syncStatus: 'Pending Sync',
+    assessmentStatus: 'ASSESSED',
+    syncStatus: 'PENDING_SYNC',
     currentAssessmentId: 'ASM-0104-1',
     assessmentHistory: [CANONICAL_ASSESSMENTS[3]],
     createdAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
@@ -483,12 +515,17 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
   {
     id: 'ENC-2026-0105',
     patientId: 'PHC-2026-0105',
+    receiptId: 'RCP-2026-0105',
+    arrivalTimestamp: new Date(Date.now() - 27 * 60 * 1000).toISOString(),
+    registeredAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+    receiptGeneratedAt: new Date(Date.now() - 24 * 60 * 1000).toISOString(),
+    receiptPrintStatus: 'RECEIPT_GENERATED',
     chiefComplaint: 'Repeated vomiting & extreme dizziness',
-    symptoms: ['Repeated Vomiting', 'Severe Dizziness', 'Extreme Lethargy', 'Postural Collapse'],
+    symptoms: ['Repeated Vomiting', 'Severe Dizziness'],
     duration: '1 day',
-    onset: 'Began morning after village feast; 8+ episodes of watery emesis',
+    onset: 'Sudden (within minutes/hours)',
     severity: 'Severe',
-    medicalHistory: ['None noted'],
+    medicalHistory: [],
     currentMedications: 'None',
     allergies: 'None',
     clinicalNotes: 'Severely dehydrated. Dry tongue, sunken eyes. Peripheral pulses very weak/thready; automated cuff failed twice.',
@@ -503,8 +540,9 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
       measuredBy: 'Rekha Ben (ASHA Worker)'
     },
     status: 'Awaiting Assessment',
-    priority: 'URGENT',
-    syncStatus: 'Saved Locally',
+    priority: 'ROUTINE',
+    assessmentStatus: 'HUMAN_REVIEW_REQUIRED',
+    syncStatus: 'LOCAL_ONLY',
     currentAssessmentId: 'ASM-0105-1',
     assessmentHistory: [CANONICAL_ASSESSMENTS[4]],
     createdAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
@@ -515,12 +553,17 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
   {
     id: 'ENC-2026-0106',
     patientId: 'PHC-2026-0106',
+    receiptId: 'RCP-2026-0106',
+    arrivalTimestamp: new Date(Date.now() - 77 * 60 * 1000).toISOString(),
+    registeredAt: new Date(Date.now() - 75 * 60 * 1000).toISOString(),
+    receiptGeneratedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    receiptPrintStatus: 'RECEIPT_GENERATED',
     chiefComplaint: 'Viral fever with deterioration in waiting hall',
-    symptoms: ['Fever', 'Progressive Dyspnea', 'Chest Heaviness'],
+    symptoms: ['High Fever', 'Shortness of Breath'],
     duration: '2 days',
-    onset: 'Initially mild fever; suddenly experienced respiratory distress while waiting in queue',
+    onset: 'Sudden (within minutes/hours)',
     severity: 'Severe',
-    medicalHistory: ['Type 2 Diabetes Mellitus (5 years)'],
+    medicalHistory: ['Type 2 Diabetes'],
     currentMedications: 'Tab Metformin 500mg BD',
     allergies: 'None',
     clinicalNotes: 'Initial intake was mild. Reassessment requested by daughter due to sudden gasping. SpO2 plunged from 96% to 89%.',
@@ -536,7 +579,8 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
     },
     status: 'Under Clinical Review',
     priority: 'EMERGENCY',
-    syncStatus: 'Pending Sync',
+    assessmentStatus: 'ASSESSED',
+    syncStatus: 'PENDING_SYNC',
     currentAssessmentId: 'ASM-0106-2',
     assessmentHistory: [CANONICAL_ASSESSMENTS[5], CANONICAL_ASSESSMENTS[6]],
     createdAt: new Date(Date.now() - 75 * 60 * 1000).toISOString(),
@@ -553,7 +597,7 @@ export const INITIAL_AUDIT_LOGS: AuditEvent[] = [
     actor: 'Sister Sunita Devi',
     actorRole: 'ANM (Auxiliary Nurse Midwife)',
     action: 'Patient Registered & Vitals Recorded',
-    details: 'Initial registration. SBP 154, SpO2 88%. Chief complaint: chest pain.'
+    details: 'Initial registration (Receipt RCP-2026-0101). SBP 154, SpO2 88%. Chief complaint: chest pain.'
   },
   {
     id: 'AUD-002',
@@ -592,8 +636,8 @@ export const INITIAL_AUDIT_LOGS: AuditEvent[] = [
     timestamp: new Date(Date.now() - 24 * 60 * 1000).toISOString(),
     actor: 'IN-PHC-TRIAGE Engine (v2.4-DEMO)',
     actorRole: 'System CDS',
-    action: 'Missing Data Safety Escalation',
-    details: 'Blood Pressure & Pulse marked UNAVAILABLE. Conservative escalation to URGENT with Human Review flag.'
+    action: 'Missing Data Safeguard Flagged',
+    details: 'Blood Pressure & Pulse marked UNAVAILABLE. Assigned HUMAN_REVIEW_REQUIRED safeguard status.'
   },
   {
     id: 'AUD-006',
