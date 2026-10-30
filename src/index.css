@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'DM Sans', 'Noto Sans Gurmukhi', 'Noto Sans Devanagari', system-ui, -apple-system, sans-serif;
+    --font-display: 'Plus Jakarta Sans', 'Noto Sans Gurmukhi', 'Noto Sans Devanagari', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  html,
+  body {
+    font-family: var(--font-sans);
+    color: #172033;
+    background-color: #F8FAFC;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  code, pre, .font-mono, .tabular-nums {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Fluid responsive layout containers across desktop, laptop, tablet, and mobile */
+.app-container,
+.registration-container {
+  width: min(93%, 1680px);
+  margin-inline: auto;
+}
+
+@media (max-width: 1439px) {
+  .app-container,
+  .registration-container {
+    width: 94%;
+  }
+}
+
+@media (max-width: 1199px) {
+  .app-container,
+  .registration-container {
+    width: 96%;
+  }
+}
+
+@media (max-width: 991px) {
+  .app-container,
+  .registration-container {
+    width: calc(100% - 32px);
+  }
+}
+
+@media (max-width: 767px) {
+  .app-container,
+  .registration-container {
+    width: calc(100% - 28px);
+  }
+}
+
+@media (max-width: 480px) {
+  .app-container,
+  .registration-container {
+    width: calc(100% - 20px);
+  }
+}
+
+/* Registration Section A 4-column desktop grid, 2-column tablet, 1-column mobile */
+.registration-grid-section-a {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.875rem 1rem;
+}
+
+@media (max-width: 1023px) {
+  .registration-grid-section-a {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  .registration-grid-section-a {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Registration Section B 3-column desktop grid, 2-column tablet, 1-column mobile */
+.registration-grid-section-b {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.875rem 1rem;
+}
+
+@media (max-width: 1023px) {
+  .registration-grid-section-b {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  .registration-grid-section-b {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Print styles for clinical triage summary */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+  }
+}

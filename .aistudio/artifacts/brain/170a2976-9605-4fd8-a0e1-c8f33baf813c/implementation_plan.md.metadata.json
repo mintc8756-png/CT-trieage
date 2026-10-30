@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for transitioning XOR Triage to a two-level triage priority system (EMERGENCY and ROUTINE with a separate HUMAN_REVIEW_REQUIRED assessment status), safe legacy record migration, automatic offline network detection, post-registration Assessment Summary workflow, and dedicated black-and-white A4 printable clinical handover receipts.",
+  "updatedAt":  "2026-10-30T16:04:11.284714106Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

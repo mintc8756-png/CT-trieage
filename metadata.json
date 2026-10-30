@@ -1,0 +1,6 @@
+{
+  "name": "AI Triage — Rural Health Centre Clinical Decision Support",
+  "description": "Clinical decision support & triage queue system for rural primary health centres (PHC), sub-centres, and frontline community health workers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
