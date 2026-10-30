@@ -1,0 +1,251 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Hardened Global Helpers
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 64 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUid(uid) {
+      return uid is string && uid.size() >= 1 && uid.size() <= 128 && uid.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Entity Blueprints
+    function isValidStaffProfile(data) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'name', 'role', 'roleCategory',
+          'registrationNumber', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'name', 'role', 'roleCategory',
+          'registrationNumber', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidUid(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.role is string && data.role.size() >= 1 && data.role.size() <= 64 &&
+        (data.role == 'ANM (Auxiliary Nurse Midwife)' ||
+         data.role == 'Staff Nurse' ||
+         data.role == 'Medical Officer (Doctor)' ||
+         data.role == 'ASHA Worker') &&
+        data.roleCategory is string && data.roleCategory.size() >= 1 && data.roleCategory.size() <= 32 &&
+        (data.roleCategory == 'ASHA_NURSE' || data.roleCategory == 'DOCTOR') &&
+        data.registrationNumber is string &&
+        data.registrationNumber.size() >= 1 &&
+        data.registrationNumber.size() <= 64 &&
+        data.registrationNumber.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPatient(data) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'fullName', 'age', 'gender',
+          'village', 'preferredLanguage', 'registeredAt', 'registeredBy',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'fullName', 'age', 'gender',
+          'village', 'preferredLanguage', 'registeredAt', 'registeredBy',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidUid(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
+        data.age is number && data.age >= 0 && data.age <= 120 &&
+        data.gender is string && data.gender.size() >= 1 && data.gender.size() <= 16 &&
+        (data.gender == 'Male' || data.gender == 'Female' || data.gender == 'Other') &&
+        data.village is string && data.village.size() >= 1 && data.village.size() <= 120 &&
+        data.preferredLanguage is string && data.preferredLanguage.size() >= 2 && data.preferredLanguage.size() <= 8 &&
+        (data.preferredLanguage == 'en' || data.preferredLanguage == 'hi' || data.preferredLanguage == 'pa') &&
+        data.registeredAt is string && data.registeredAt.size() >= 1 && data.registeredAt.size() <= 64 &&
+        data.registeredBy is string && data.registeredBy.size() >= 1 && data.registeredBy.size() <= 120 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEncounter(data) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'patientId', 'receiptId', 'chiefComplaint',
+          'duration', 'onset', 'severity', 'status', 'priority',
+          'assessmentStatus', 'syncStatus', 'currentAssessmentId',
+          'arrivalTimestamp', 'registeredAt', 'receiptGeneratedAt',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'patientId', 'receiptId', 'chiefComplaint',
+          'duration', 'onset', 'severity', 'status', 'priority',
+          'assessmentStatus', 'syncStatus', 'currentAssessmentId',
+          'arrivalTimestamp', 'registeredAt', 'receiptGeneratedAt',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidUid(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        isValidId(data.patientId) &&
+        isValidId(data.receiptId) &&
+        data.chiefComplaint is string && data.chiefComplaint.size() >= 1 && data.chiefComplaint.size() <= 500 &&
+        data.duration is string && data.duration.size() >= 1 && data.duration.size() <= 100 &&
+        data.onset is string && data.onset.size() >= 1 && data.onset.size() <= 100 &&
+        data.severity is string && data.severity.size() >= 1 && data.severity.size() <= 32 &&
+        (data.severity == 'Mild' || data.severity == 'Moderate' || data.severity == 'Severe') &&
+        data.status is string && data.status.size() >= 1 && data.status.size() <= 64 &&
+        (data.status == 'Awaiting Assessment' ||
+         data.status == 'Under Clinical Review' ||
+         data.status == 'Reassessment Required' ||
+         data.status == 'Completed') &&
+        data.priority is string && data.priority.size() >= 1 && data.priority.size() <= 32 &&
+        (data.priority == 'EMERGENCY' || data.priority == 'ROUTINE') &&
+        data.assessmentStatus is string && data.assessmentStatus.size() >= 1 && data.assessmentStatus.size() <= 32 &&
+        (data.assessmentStatus == 'ASSESSED' || data.assessmentStatus == 'HUMAN_REVIEW_REQUIRED') &&
+        data.syncStatus is string && data.syncStatus.size() >= 1 && data.syncStatus.size() <= 32 &&
+        (data.syncStatus == 'LOCAL_ONLY' ||
+         data.syncStatus == 'PENDING_SYNC' ||
+         data.syncStatus == 'SYNCED' ||
+         data.syncStatus == 'SYNC_FAILED') &&
+        isValidId(data.currentAssessmentId) &&
+        data.arrivalTimestamp is string && data.arrivalTimestamp.size() >= 1 && data.arrivalTimestamp.size() <= 64 &&
+        data.registeredAt is string && data.registeredAt.size() >= 1 && data.registeredAt.size() <= 64 &&
+        data.receiptGeneratedAt is string && data.receiptGeneratedAt.size() >= 1 && data.receiptGeneratedAt.size() <= 64 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'encounterId', 'patientId', 'eventTimestamp',
+          'actor', 'actorRole', 'action', 'details', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'encounterId', 'patientId', 'eventTimestamp',
+          'actor', 'actorRole', 'action', 'details', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidUid(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        isValidId(data.encounterId) &&
+        isValidId(data.patientId) &&
+        data.eventTimestamp is string && data.eventTimestamp.size() >= 1 && data.eventTimestamp.size() <= 64 &&
+        data.actor is string && data.actor.size() >= 1 && data.actor.size() <= 120 &&
+        data.actorRole is string && data.actorRole.size() >= 1 && data.actorRole.size() <= 64 &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 120 &&
+        data.details is string && data.details.size() >= 1 && data.details.size() <= 1000 &&
+        data.createdAt is timestamp;
+    }
+
+    // 1. Staff Profiles Collection
+    match /staffProfiles/{staffId} {
+      allow get: if isSignedIn() && isValidId(staffId) && (resource == null || existing().ownerUid == request.auth.uid);
+      allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow create: if isSignedIn() &&
+        isValidId(staffId) &&
+        isValidStaffProfile(incoming()) &&
+        incoming().id == staffId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() &&
+        isValidId(staffId) &&
+        isValidStaffProfile(incoming()) &&
+        existing().ownerUid == request.auth.uid &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().role == existing().role &&
+        incoming().roleCategory == existing().roleCategory &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'registrationNumber', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // 2. Patients Collection
+    match /patients/{patientId} {
+      allow get: if isSignedIn() && isValidId(patientId) && (resource == null || existing().ownerUid == request.auth.uid);
+      allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow create: if isSignedIn() &&
+        isValidId(patientId) &&
+        isValidPatient(incoming()) &&
+        incoming().id == patientId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() &&
+        isValidId(patientId) &&
+        isValidPatient(incoming()) &&
+        existing().ownerUid == request.auth.uid &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'fullName', 'age', 'gender', 'village', 'preferredLanguage', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(patientId) && existing().ownerUid == request.auth.uid;
+    }
+
+    // 3. Encounters Collection
+    match /encounters/{encounterId} {
+      allow get: if isSignedIn() && isValidId(encounterId) && (resource == null || existing().ownerUid == request.auth.uid);
+      allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow create: if isSignedIn() &&
+        isValidId(encounterId) &&
+        isValidEncounter(incoming()) &&
+        incoming().id == encounterId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/patients/$(incoming().patientId)) &&
+        get(/databases/$(database)/documents/patients/$(incoming().patientId)).data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn() &&
+        isValidId(encounterId) &&
+        isValidEncounter(incoming()) &&
+        existing().ownerUid == request.auth.uid &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().patientId == existing().patientId &&
+        incoming().receiptId == existing().receiptId &&
+        incoming().arrivalTimestamp == existing().arrivalTimestamp &&
+        incoming().registeredAt == existing().registeredAt &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Action 1: Care status or sync state update
+          (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'syncStatus', 'updatedAt'])) ||
+          // Action 2: Reassessment or clinician priority override
+          (existing().status != 'Completed' &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'priority', 'assessmentStatus', 'syncStatus', 'currentAssessmentId', 'updatedAt'
+           ]))
+        );
+      allow delete: if isSignedIn() && isValidId(encounterId) && existing().ownerUid == request.auth.uid;
+    }
+
+    // 4. Immutable Audit Logs Collection
+    match /auditLogs/{auditId} {
+      allow get: if isSignedIn() && isValidId(auditId) && (resource == null || existing().ownerUid == request.auth.uid);
+      allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow create: if isSignedIn() &&
+        isValidId(auditId) &&
+        isValidAuditLog(incoming()) &&
+        incoming().id == auditId &&
+        incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}

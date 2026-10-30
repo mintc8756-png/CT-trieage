@@ -1,26 +1,27 @@
 import React from 'react';
 import { StaffProfile, SupportedLanguage } from '../types/triage';
 import { useI18n } from '../i18n';
-import { Wifi, WifiOff, Plus, User, Globe } from 'lucide-react';
+import { isDoctorRole } from './AuthView';
+import { Wifi, WifiOff, Plus, User, Globe, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   currentStaff: StaffProfile;
-  staffList: StaffProfile[];
-  onSelectStaff: (staff: StaffProfile) => void;
   isOnline: boolean;
-  onToggleOnline: () => void;
   onRegisterClick: () => void;
+  onSignOut: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentStaff,
-  staffList,
-  onSelectStaff,
   isOnline,
-  onToggleOnline,
-  onRegisterClick
+  onRegisterClick,
+  onSignOut
 }) => {
   const { language, setLanguage, t, dict } = useI18n();
+  const isDoctor = isDoctorRole(currentStaff);
+  const shortRole =
+    dict.staffRoles.short[currentStaff.role as keyof typeof dict.staffRoles.short] ||
+    currentStaff.role.split(' ')[0];
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 py-3 no-print shadow-xs">
@@ -28,15 +29,12 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand Zone (No Logo Icon) */}
         <div className="flex items-center shrink-0">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center">
               <span className="text-base font-bold tracking-tight text-slate-900 font-display">
                 {t('app.title')}
               </span>
-              <span className="text-xs font-mono text-slate-400">
-                {t('app.version')}
-              </span>
             </div>
-            <p className="text-xs text-slate-500 hidden sm:block">
+            <p className="text-xs text-slate-500">
               {t('app.facility')}
             </p>
           </div>
@@ -44,28 +42,31 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Connectivity & Operational Controls */}
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          {/* Connectivity Status Toggle */}
-          <button
-            onClick={onToggleOnline}
+          {/* Live Network Connectivity Status Indicator */}
+          <div
+            role="status"
+            aria-live="polite"
             title={isOnline ? t('header.toggleOnlineTitle') : t('header.toggleOfflineTitle')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors border cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border select-none ${
               isOnline
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : 'bg-amber-50 text-amber-900 border-amber-300'
             }`}
           >
             {isOnline ? (
               <>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                 <Wifi className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 <span>{t('header.onlineFull')}</span>
               </>
             ) : (
               <>
+                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
                 <WifiOff className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                 <span>{t('header.offlineFull')}</span>
               </>
             )}
-          </button>
+          </div>
 
           {/* Global Application Language Selector (English / हिन्दी / ਪੰਜਾਬੀ) */}
           <div className="relative">
@@ -88,45 +89,35 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Staff Switcher */}
-          <div className="relative min-w-0">
-            <label htmlFor="staff-select" className="sr-only">
-              {t('header.activeClinician')}
-            </label>
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 bg-slate-50 text-xs text-slate-700">
-              <User className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-              <select
-                id="staff-select"
-                aria-label={t('header.activeClinician')}
-                value={currentStaff.id}
-                onChange={(e) => {
-                  const found = staffList.find(s => s.id === e.target.value);
-                  if (found) onSelectStaff(found);
-                }}
-                className="bg-transparent border-none text-xs font-medium text-slate-800 focus:outline-none cursor-pointer pr-1 max-w-[160px] sm:max-w-none truncate"
-              >
-                {staffList.map((st) => {
-                  const shortRole =
-                    dict.staffRoles.short[st.role as keyof typeof dict.staffRoles.short] ||
-                    st.role.split(' ')[0];
-                  return (
-                    <option key={st.id} value={st.id}>
-                      {st.name} ({shortRole})
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
+          {/* Logged-in Staff Identity & Sign Out */}
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-slate-200 bg-slate-50 text-xs text-slate-700">
+            <User className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            <span className="font-semibold text-slate-900 truncate max-w-[140px] sm:max-w-none">
+              {currentStaff.name}
+            </span>
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-600 font-medium">{shortRole}</span>
+            <button
+              type="button"
+              onClick={onSignOut}
+              title={t('auth.signOutBtn')}
+              className="ml-1 inline-flex items-center gap-1 text-slate-500 hover:text-red-600 font-semibold transition-colors cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">{t('auth.signOutBtn')}</span>
+            </button>
           </div>
 
-          {/* Primary Action Button */}
-          <button
-            onClick={onRegisterClick}
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors whitespace-nowrap cursor-pointer active:scale-98"
-          >
-            <Plus className="w-4 h-4 shrink-0" />
-            <span>{t('header.registerPatient')}</span>
-          </button>
+          {/* Primary Action Button (ASHA / Nurse intake CTA) */}
+          {!isDoctor && (
+            <button
+              onClick={onRegisterClick}
+              className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors whitespace-nowrap cursor-pointer active:scale-98"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span>{t('header.registerPatient')}</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

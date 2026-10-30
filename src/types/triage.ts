@@ -150,11 +150,16 @@ export interface AuditEvent {
   details: string;
 }
 
+export type StaffRoleCategory = 'ASHA_NURSE' | 'DOCTOR';
+
 export interface StaffProfile {
   id: string;
   name: string;
   role: 'ANM (Auxiliary Nurse Midwife)' | 'Staff Nurse' | 'Medical Officer (Doctor)' | 'ASHA Worker';
+  roleCategory?: StaffRoleCategory;
   registrationNumber?: string;
+  email?: string;
+  password?: string;
 }
 
 export interface LanguageOption {

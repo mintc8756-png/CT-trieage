@@ -21,6 +21,14 @@ import {
   INITIAL_AUDIT_LOGS
 } from '../utils/mockData';
 
+import {
+  isCloudAuthReady,
+  syncPatientToFirestore,
+  syncEncounterToFirestore,
+  syncAuditLogToFirestore,
+  deletePatientFromFirestore
+} from './firebase';
+
 const DB_NAME = 'AITriage_RuralPHC_DB';
 const DB_VERSION = 2;
 
@@ -100,23 +108,57 @@ class PatientRepository {
    * - Does NOT silently convert legacy Urgent records into ordinary Routine; flags them as HUMAN_REVIEW_REQUIRED
    * - Ensures every encounter has a stable receiptId and timestamps
    */
+  private convertCelsiusTextToFahrenheit(text: string): string {
+    if (!text || !text.includes('°C')) return text;
+    return text
+      .replace(/(\d+(?:\.\d+)?)°C\s*\((\d+(?:\.\d+)?)°F\)/g, '$2°F')
+      .replace(/(\d+(?:\.\d+)?)°C/g, (_, cStr) => {
+        const c = parseFloat(cStr);
+        if (isNaN(c)) return `${cStr}°F`;
+        return `${((c * 9) / 5 + 32).toFixed(1)}°F`;
+      });
+  }
+
   private migrateSingleAssessment(asm: TriageAssessment): { migrated: TriageAssessment; changed: boolean } {
     let changed = false;
     const rawPriority = asm.priority as string;
     const updatedRules = (asm.triggeredRules || []).map(rule => {
+      let ruleChanged = false;
+      let newSeverity = rule.severity;
       if ((rule.severity as string) !== 'EMERGENCY' && (rule.severity as string) !== 'HUMAN_REVIEW_REQUIRED') {
         changed = true;
-        return {
-          ...rule,
-          severity: 'HUMAN_REVIEW_REQUIRED' as const
-        };
+        ruleChanged = true;
+        newSeverity = 'HUMAN_REVIEW_REQUIRED' as const;
       }
-      return rule;
+      const newCriterion = this.convertCelsiusTextToFahrenheit(rule.criterion);
+      const newFinding = this.convertCelsiusTextToFahrenheit(rule.observedFinding);
+      if (newCriterion !== rule.criterion || newFinding !== rule.observedFinding) {
+        changed = true;
+        ruleChanged = true;
+      }
+      return ruleChanged
+        ? {
+            ...rule,
+            criterion: newCriterion,
+            observedFinding: newFinding,
+            severity: newSeverity
+          }
+        : rule;
+    });
+
+    const updatedExplanation = (asm.explanation || []).map(exp => {
+      const converted = this.convertCelsiusTextToFahrenheit(exp);
+      if (converted !== exp) changed = true;
+      return converted;
     });
 
     let priority: TriagePriority = rawPriority === 'EMERGENCY' ? 'EMERGENCY' : 'ROUTINE';
     let requiresHumanReview = Boolean(asm.requiresHumanReview);
-    let humanReviewReason = asm.humanReviewReason;
+    let humanReviewReason = asm.humanReviewReason
+      ? this.convertCelsiusTextToFahrenheit(asm.humanReviewReason)
+      : asm.humanReviewReason;
+    if (humanReviewReason !== asm.humanReviewReason) changed = true;
+
     let legacyPriorityFlag = asm.legacyPriorityFlag;
 
     if (rawPriority !== 'EMERGENCY' && rawPriority !== 'ROUTINE') {
@@ -146,6 +188,7 @@ class PatientRepository {
         priority,
         assessmentStatus,
         triggeredRules: updatedRules,
+        explanation: updatedExplanation,
         requiresHumanReview,
         humanReviewReason,
         legacyPriorityFlag
@@ -179,15 +222,49 @@ class PatientRepository {
       changed = true;
     }
 
-    const receiptSuffix = enc.id.replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || '1001';
-    const receiptId = enc.receiptId || `RCP-2026-${receiptSuffix}`;
+    // Migrate temperature from °C to °F if stored in Celsius
+    let migratedVitals = enc.vitalSigns;
+    if (enc.vitalSigns?.temperature) {
+      const tVal = enc.vitalSigns.temperature.value;
+      const tUnit = enc.vitalSigns.temperature.unit;
+      if (tVal !== null && (tUnit === '°C' || tVal < 60)) {
+        const fahrenheitVal = Number(((tVal * 9) / 5 + 32).toFixed(1));
+        migratedVitals = {
+          ...enc.vitalSigns,
+          temperature: {
+            ...enc.vitalSigns.temperature,
+            value: fahrenheitVal,
+            unit: '°F'
+          }
+        };
+        changed = true;
+      } else if (tUnit !== '°F') {
+        migratedVitals = {
+          ...enc.vitalSigns,
+          temperature: {
+            ...enc.vitalSigns.temperature,
+            unit: '°F'
+          }
+        };
+        changed = true;
+      }
+    }
+
+    const patientDigits = enc.patientId?.match(/\d{4}$/)?.[0];
+    const fallbackSuffix = enc.id.replace(/[^0-9]/g, '').slice(-4).padStart(4, '0') || '0101';
+    const receiptSuffix = patientDigits || fallbackSuffix;
+    const FixedReceiptPattern = /^RCP-2026-\d{4}$/;
+    const receiptId =
+      enc.receiptId && FixedReceiptPattern.test(enc.receiptId)
+        ? enc.receiptId
+        : `RCP-2026-${receiptSuffix}`;
     const arrivalTimestamp = enc.arrivalTimestamp || enc.createdAt || new Date().toISOString();
     const registeredAt = enc.registeredAt || enc.createdAt || new Date().toISOString();
     const receiptGeneratedAt = enc.receiptGeneratedAt || currentAsm?.assessedAt || enc.updatedAt || new Date().toISOString();
     const receiptPrintStatus = enc.receiptPrintStatus || 'RECEIPT_GENERATED';
 
     if (
-      !enc.receiptId ||
+      enc.receiptId !== receiptId ||
       !enc.arrivalTimestamp ||
       !enc.registeredAt ||
       !enc.receiptGeneratedAt ||
@@ -200,6 +277,7 @@ class PatientRepository {
     return {
       migrated: {
         ...enc,
+        vitalSigns: migratedVitals,
         priority,
         assessmentStatus,
         receiptId,
@@ -208,6 +286,24 @@ class PatientRepository {
         receiptGeneratedAt,
         receiptPrintStatus,
         assessmentHistory: migratedHistory
+      },
+      changed
+    };
+  }
+
+  private normalizePatientRecord(p: Patient): { normalized: Patient; changed: boolean } {
+    const formattedName = (p.fullName || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .split(' ')
+      .map(word => (word ? word.charAt(0).toUpperCase() + word.slice(1) : ''))
+      .join(' ');
+
+    const changed = formattedName !== p.fullName;
+    return {
+      normalized: {
+        ...p,
+        fullName: formattedName || p.fullName
       },
       changed
     };
@@ -229,7 +325,13 @@ class PatientRepository {
         const assessments = await this.getAllFromStore<TriageAssessment>('assessments');
         const auditLogs = await this.getAllFromStore<AuditEvent>('auditLogs');
 
-        patients.forEach(p => this.patientsCache.set(p.id, p));
+        for (const p of patients) {
+          const { normalized, changed } = this.normalizePatientRecord(p);
+          this.patientsCache.set(normalized.id, normalized);
+          if (changed) {
+            await this.putToStore('patients', normalized);
+          }
+        }
 
         for (const a of assessments) {
           const { migrated, changed } = this.migrateSingleAssessment(a);
@@ -349,6 +451,24 @@ class PatientRepository {
     });
   }
 
+  private deleteFromStore(storeName: string, id: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        resolve();
+        return;
+      }
+      try {
+        const tx = this.db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        store.delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   private getAllFromStore<T>(storeName: string): Promise<T[]> {
     return new Promise((resolve) => {
       if (!this.db) {
@@ -386,6 +506,24 @@ class PatientRepository {
   }
 
   // Public Query APIs
+  public getNextRegistrationIds(): { patientId: string; receiptId: string } {
+    let maxSeq = 106;
+    this.patientsCache.forEach(p => {
+      const match = p.id.match(/^PHC-2026-(\d{4})$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num < 1000 && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+    });
+    const nextCode = String(maxSeq + 1).padStart(4, '0');
+    return {
+      patientId: `PHC-2026-${nextCode}`,
+      receiptId: `RCP-2026-${nextCode}`
+    };
+  }
+
   public getAllPatients(): Patient[] {
     return Array.from(this.patientsCache.values()).sort(
       (a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
@@ -419,8 +557,20 @@ class PatientRepository {
     patient: Patient,
     encounter: Encounter,
     assessment: TriageAssessment,
-    auditEvent: AuditEvent
+    auditEvent: AuditEvent,
+    isOnline = true
   ): Promise<void> {
+    if (isOnline && encounter.syncStatus !== 'LOCAL_ONLY') {
+      if (isCloudAuthReady()) {
+        await syncPatientToFirestore(patient);
+        await syncEncounterToFirestore(encounter);
+        await syncAuditLogToFirestore(auditEvent);
+      }
+      encounter.syncStatus = 'SYNCED';
+    } else {
+      encounter.syncStatus = 'LOCAL_ONLY';
+    }
+
     this.patientsCache.set(patient.id, patient);
     this.encountersCache.set(encounter.id, encounter);
     this.assessmentsCache.set(assessment.id, assessment);
@@ -429,6 +579,71 @@ class PatientRepository {
     await this.putToStore('patients', patient);
     await this.putToStore('encounters', encounter);
     await this.putToStore('assessments', assessment);
+    await this.putToStore('auditLogs', auditEvent);
+
+    this.persistFallback();
+  }
+
+  public async deletePatient(
+    patientId: string,
+    actorName: string,
+    actorRole: string,
+    isOnline = true
+  ): Promise<void> {
+    const patient = this.patientsCache.get(patientId);
+    const patientName = patient ? patient.fullName : patientId;
+
+    // Collect encounters and assessments belonging to this patient
+    const encounterIdsToRemove: string[] = [];
+    const assessmentIdsToRemove = new Set<string>();
+
+    this.encountersCache.forEach(enc => {
+      if (enc.patientId === patientId) {
+        encounterIdsToRemove.push(enc.id);
+        enc.assessmentHistory.forEach(a => assessmentIdsToRemove.add(a.id));
+      }
+    });
+
+    this.assessmentsCache.forEach(ass => {
+      if (ass.patientId === patientId) {
+        assessmentIdsToRemove.add(ass.id);
+      }
+    });
+
+    if (isOnline && isCloudAuthReady()) {
+      await deletePatientFromFirestore(patientId, encounterIdsToRemove);
+    }
+
+    // Remove from in-memory caches and IndexedDB
+    this.patientsCache.delete(patientId);
+    await this.deleteFromStore('patients', patientId);
+
+    for (const encId of encounterIdsToRemove) {
+      this.encountersCache.delete(encId);
+      await this.deleteFromStore('encounters', encId);
+    }
+
+    for (const assId of assessmentIdsToRemove) {
+      this.assessmentsCache.delete(assId);
+      await this.deleteFromStore('assessments', assId);
+    }
+
+    const auditEvent: AuditEvent = {
+      id: 'AUD-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
+      encounterId: encounterIdsToRemove[0] || 'DELETED',
+      patientId,
+      timestamp: new Date().toISOString(),
+      actor: actorName,
+      actorRole,
+      action: 'Patient Record Deleted',
+      details: `Deleted patient ${patientName} (${patientId}) and ${encounterIdsToRemove.length} associated encounter(s).`
+    };
+
+    if (isOnline && isCloudAuthReady()) {
+      await syncAuditLogToFirestore(auditEvent);
+    }
+
+    this.auditLogsCache.unshift(auditEvent);
     await this.putToStore('auditLogs', auditEvent);
 
     this.persistFallback();
@@ -449,7 +664,14 @@ class PatientRepository {
     enc.assessmentHistory.push(newAssessment);
     enc.updatedAt = new Date().toISOString();
     enc.status = 'Under Clinical Review';
-    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
+    enc.syncStatus = isOnline ? 'SYNCED' : 'LOCAL_ONLY';
+
+    if (isOnline && isCloudAuthReady()) {
+      const pat = this.patientsCache.get(enc.patientId);
+      if (pat) await syncPatientToFirestore(pat);
+      await syncEncounterToFirestore(enc);
+      await syncAuditLogToFirestore(auditEvent);
+    }
 
     this.assessmentsCache.set(newAssessment.id, newAssessment);
     this.encountersCache.set(encounterId, enc);
@@ -476,7 +698,7 @@ class PatientRepository {
     const oldStatus = enc.status;
     enc.status = newStatus;
     enc.updatedAt = new Date().toISOString();
-    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
+    enc.syncStatus = isOnline ? 'SYNCED' : 'LOCAL_ONLY';
 
     const audit: AuditEvent = {
       id: 'AUD-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
@@ -488,6 +710,13 @@ class PatientRepository {
       action: 'Care Status Updated',
       details: `Status transitioned from "${oldStatus}" to "${newStatus}".`
     };
+
+    if (isOnline && isCloudAuthReady()) {
+      const pat = this.patientsCache.get(enc.patientId);
+      if (pat) await syncPatientToFirestore(pat);
+      await syncEncounterToFirestore(enc);
+      await syncAuditLogToFirestore(audit);
+    }
 
     this.encountersCache.set(encounterId, enc);
     this.auditLogsCache.unshift(audit);
@@ -512,7 +741,7 @@ class PatientRepository {
     enc.priority = newPriority;
     enc.assessmentStatus = 'ASSESSED';
     enc.updatedAt = new Date().toISOString();
-    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
+    enc.syncStatus = isOnline ? 'SYNCED' : 'LOCAL_ONLY';
 
     if (currentAsm) {
       currentAsm.priority = newPriority;
@@ -540,6 +769,13 @@ class PatientRepository {
       action: 'Clinician Override Applied',
       details: `Priority changed from ${oldPriority} to ${newPriority}. Justification: "${justification}".`
     };
+
+    if (isOnline && isCloudAuthReady()) {
+      const pat = this.patientsCache.get(enc.patientId);
+      if (pat) await syncPatientToFirestore(pat);
+      await syncEncounterToFirestore(enc);
+      await syncAuditLogToFirestore(audit);
+    }
 
     this.encountersCache.set(encounterId, enc);
     this.auditLogsCache.unshift(audit);
@@ -572,6 +808,9 @@ class PatientRepository {
         action: printStatus === 'PRINTED_CONFIRMED' ? 'Patient Receipt Printed' : 'Patient Receipt Print Dialog Opened',
         details: `Receipt ${enc.receiptId} print status recorded as ${printStatus}.`
       };
+      if (typeof navigator !== 'undefined' && navigator.onLine && isCloudAuthReady()) {
+        await syncAuditLogToFirestore(audit);
+      }
       this.auditLogsCache.unshift(audit);
       await this.putToStore('auditLogs', audit);
     }
@@ -586,7 +825,8 @@ class PatientRepository {
     assessmentId: string,
     actorName: string,
     actorRole: string,
-    notes: string
+    notes: string,
+    isOnline = true
   ): Promise<void> {
     const asm = this.assessmentsCache.get(assessmentId);
     const enc = this.encountersCache.get(encounterId);
@@ -598,6 +838,7 @@ class PatientRepository {
 
     enc.status = 'Under Clinical Review';
     enc.updatedAt = new Date().toISOString();
+    enc.syncStatus = isOnline ? 'SYNCED' : 'LOCAL_ONLY';
 
     const audit: AuditEvent = {
       id: 'AUD-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
@@ -609,6 +850,13 @@ class PatientRepository {
       action: 'Emergency Red-Flag Acknowledged',
       details: `Staff confirmed emergency protocol and immediate doctor alert. Notes: ${notes || 'Standard protocol initiated'}`
     };
+
+    if (isOnline && isCloudAuthReady()) {
+      const pat = this.patientsCache.get(enc.patientId);
+      if (pat) await syncPatientToFirestore(pat);
+      await syncEncounterToFirestore(enc);
+      await syncAuditLogToFirestore(audit);
+    }
 
     this.assessmentsCache.set(asm.id, asm);
     this.encountersCache.set(encounterId, enc);
@@ -624,19 +872,34 @@ class PatientRepository {
     let count = 0;
     const encounters = Array.from(this.encountersCache.values());
 
+    if (isCloudAuthReady()) {
+      // Push all local patients first so relational checks in Firestore rules pass
+      const patients = Array.from(this.patientsCache.values());
+      for (const pat of patients) {
+        await syncPatientToFirestore(pat);
+      }
+    }
+
     for (const enc of encounters) {
       if (
         enc.syncStatus === 'LOCAL_ONLY' ||
         enc.syncStatus === 'PENDING_SYNC' ||
         enc.syncStatus === 'Saved Locally' ||
         enc.syncStatus === 'Pending Sync' ||
-        enc.syncStatus === 'SYNC_FAILED'
+        enc.syncStatus === 'SYNC_FAILED' ||
+        isCloudAuthReady()
       ) {
+        const wasPending = enc.syncStatus !== 'SYNCED' && enc.syncStatus !== 'Synced';
+        if (isCloudAuthReady()) {
+          await syncEncounterToFirestore(enc);
+        }
         // Preserve original arrival, registration, and receipt metadata while marking SYNCED
         enc.syncStatus = 'SYNCED';
-        enc.updatedAt = new Date().toISOString();
-        await this.putToStore('encounters', enc);
-        count++;
+        if (wasPending) {
+          enc.updatedAt = new Date().toISOString();
+          await this.putToStore('encounters', enc);
+          count++;
+        }
       }
     }
 
@@ -649,8 +912,11 @@ class PatientRepository {
         actor: 'Background Sync Worker',
         actorRole: 'System',
         action: 'Cloud Synchronization Successful',
-        details: `Reconciled ${count} offline pending health record(s) to central registry using stable encounter and receipt IDs.`
+        details: `Reconciled ${count} offline pending health record(s) to central Firestore registry using stable encounter and receipt IDs.`
       };
+      if (isCloudAuthReady()) {
+        await syncAuditLogToFirestore(audit);
+      }
       this.auditLogsCache.unshift(audit);
       await this.putToStore('auditLogs', audit);
       this.persistFallback();
@@ -680,8 +946,8 @@ class PatientRepository {
   public exportFullJSON(): string {
     const payload = {
       exportTimestamp: new Date().toISOString(),
-      facility: 'Primary Health Centre (PHC) Rampur Kalan',
-      protocolVersion: 'IN-PHC-TRIAGE-v2.4-DEMO',
+      facility: 'Rural Health Centers',
+      protocolVersion: 'IN-PHC-TRIAGE-v2.4',
       patients: Array.from(this.patientsCache.values()),
       encounters: Array.from(this.encountersCache.values()),
       assessments: Array.from(this.assessmentsCache.values()),

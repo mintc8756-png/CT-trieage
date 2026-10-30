@@ -14,7 +14,6 @@ import {
 
 interface SyncCenterViewProps {
   isOnline: boolean;
-  onToggleOnline: () => void;
   patients: Patient[];
   encounters: Encounter[];
   assessments: TriageAssessment[];
@@ -26,7 +25,6 @@ interface SyncCenterViewProps {
 
 export const SyncCenterView: React.FC<SyncCenterViewProps> = ({
   isOnline,
-  onToggleOnline,
   patients,
   encounters,
   assessments,
@@ -115,16 +113,24 @@ export const SyncCenterView: React.FC<SyncCenterViewProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onToggleOnline}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-md border transition-colors cursor-pointer whitespace-nowrap ${
+          <div
+            role="status"
+            aria-live="polite"
+            className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md border whitespace-nowrap select-none ${
               isOnline
-                ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : 'bg-amber-50 text-amber-900 border-amber-300'
             }`}
           >
-            {isOnline ? t('syncCenter.simulateOfflineBtn') : t('syncCenter.restoreOnlineBtn')}
-          </button>
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+              }`}
+            />
+            <span>
+              {isOnline ? t('syncCenter.onlineStatusTitle') : t('syncCenter.offlineStatusTitle')}
+            </span>
+          </div>
         </div>
 
         {/* Sync Action Area */}
@@ -234,11 +240,13 @@ export const SyncCenterView: React.FC<SyncCenterViewProps> = ({
 
                 return (
                   <tr key={enc.id} className="hover:bg-slate-50">
-                    <td className="py-2.5 px-2 font-mono font-medium text-slate-800">
-                      {enc.patientId} · {enc.receiptId}
-                      <span className="block text-[11px] text-slate-500 font-sans">
+                    <td className="py-2.5 px-2 align-middle whitespace-nowrap">
+                      <div className="text-xs font-semibold text-slate-900 leading-snug">
                         {pat?.fullName || t('queue.unknownPatient')}
-                      </span>
+                      </div>
+                      <div className="text-[11px] font-mono font-medium text-slate-500 leading-tight mt-0.5 tabular-nums">
+                        {enc.patientId}
+                      </div>
                     </td>
                     <td className="py-2.5 px-2 text-slate-700 max-w-xs truncate">
                       {enc.chiefComplaint}

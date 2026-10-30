@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { Patient, Encounter } from '../types/triage';
 import { useI18n } from '../i18n';
-import { Search, ArrowUpDown, ChevronRight, AlertTriangle, Printer } from 'lucide-react';
+import { Search, ArrowUpDown, ChevronRight, AlertTriangle, Printer, Trash2 } from 'lucide-react';
 
 interface QueueViewProps {
   patients: Patient[];
   encounters: Encounter[];
   onSelectPatient: (patientId: string, encounterId: string) => void;
   onPrintReceipt: (patientId: string, encounterId: string) => void;
+  onDeletePatient: (patientId: string) => void;
   onNewRegistration: () => void;
 }
 
@@ -23,12 +24,14 @@ export const QueueView: React.FC<QueueViewProps> = ({
   patients,
   encounters,
   onSelectPatient,
-  onPrintReceipt
+  onPrintReceipt,
+  onDeletePatient
 }) => {
   const { t, dict } = useI18n();
   const [filter, setFilter] = useState<QueueFilter>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'URGENCY_FIRST' | 'WAITING_TIME'>('URGENCY_FIRST');
+  const [confirmDeletePatientId, setConfirmDeletePatientId] = useState<string | null>(null);
 
   // Pair encounters with patients
   const pairedData = useMemo(() => {
@@ -439,7 +442,7 @@ export const QueueView: React.FC<QueueViewProps> = ({
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
                     <th className="py-3 px-4 w-48">{t('queue.colPriority')}</th>
-                    <th className="py-3 px-4">{t('queue.colPatient')}</th>
+                    <th className="py-3 px-4 w-56">{t('queue.colPatient')}</th>
                     <th className="py-3 px-4 w-28">{t('queue.colAgeSex')}</th>
                     <th className="py-3 px-4">{t('queue.colKeyVitals')}</th>
                     <th className="py-3 px-4 w-44">{t('queue.colCareStatus')}</th>
@@ -468,7 +471,7 @@ export const QueueView: React.FC<QueueViewProps> = ({
                         }`}
                       >
                         {/* 1. Priority & Assessment Status */}
-                        <td className="py-3.5 px-4 whitespace-nowrap">
+                        <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                           <div className="flex flex-col items-start gap-1">
                             {isEmergency ? (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-red-100 text-red-800 border border-red-300">
@@ -490,34 +493,24 @@ export const QueueView: React.FC<QueueViewProps> = ({
                           </div>
                         </td>
 
-                        {/* 2. Patient */}
-                        <td className="py-3.5 px-4">
-                          <div className="font-semibold text-slate-900">
+                        {/* 2. Patient (Name and ID only, uniform two-line stack) */}
+                        <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                          <div className="text-xs font-semibold text-slate-900 leading-snug">
                             {patient.fullName}
                           </div>
-                          <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-mono">
-                            <span>{patient.id}</span>
-                            {encounter.receiptId && (
-                              <>
-                                <span>·</span>
-                                <span>{encounter.receiptId}</span>
-                              </>
-                            )}
-                            <span>·</span>
-                            <span className="font-sans truncate max-w-[160px]">
-                              {patient.village}
-                            </span>
+                          <div className="text-[11px] font-mono font-medium text-slate-500 leading-tight mt-0.5 tabular-nums">
+                            {patient.id}
                           </div>
                         </td>
 
                         {/* 3. Age / Sex */}
-                        <td className="py-3.5 px-4 text-slate-600 tabular-nums whitespace-nowrap">
+                        <td className="py-3.5 px-4 align-middle text-slate-700 font-medium tabular-nums whitespace-nowrap">
                           {patient.age}
                           {t('queue.yearsShort')} / {genderShort}
                         </td>
 
                         {/* 4. Key Vitals */}
-                        <td className="py-3.5 px-4 font-mono text-[11px] tabular-nums">
+                        <td className="py-3.5 px-4 align-middle font-mono text-[11px] tabular-nums">
                           <div className="flex flex-wrap items-center gap-1.5">
                             {/* SpO2 */}
                             {vs.oxygenSaturation.isUnavailable ||
@@ -579,24 +572,28 @@ export const QueueView: React.FC<QueueViewProps> = ({
                             )}
 
                             {/* Temp */}
-                            {!vs.temperature.isUnavailable && vs.temperature.value !== null && (
+                            {vs.temperature.isUnavailable || vs.temperature.value === null ? (
+                              <span className="text-amber-900 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                                {t('queue.tempLabel')}: {t('queue.naShort')}
+                              </span>
+                            ) : (
                               <span
                                 className={`px-1.5 py-0.5 rounded ${
-                                  vs.temperature.value >= 39.5
+                                  vs.temperature.value >= 103.1
                                     ? 'bg-red-100 text-red-800 font-bold'
-                                    : vs.temperature.value >= 38.3 || vs.temperature.value <= 35.0
+                                    : vs.temperature.value >= 101.0 || vs.temperature.value <= 95.0
                                     ? 'bg-amber-100 text-amber-800 font-medium'
                                     : 'bg-slate-100 text-slate-700'
                                 }`}
                               >
-                                {vs.temperature.value}°C
+                                {t('queue.tempLabel')}: {vs.temperature.value}°F
                               </span>
                             )}
                           </div>
                         </td>
 
                         {/* 5. Care Status */}
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                           <span
                             className={`inline-block px-2 py-0.5 rounded-sm text-[11px] font-medium ${
                               encounter.status === 'Completed'
@@ -612,34 +609,79 @@ export const QueueView: React.FC<QueueViewProps> = ({
                           </span>
                         </td>
 
-                        {/* 6. Action: Print Receipt + Details */}
-                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          <div className="inline-flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onPrintReceipt(patient.id, encounter.id);
-                              }}
-                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
-                              title={t('patientDetail.printSlipBtn')}
+                        {/* 6. Action: Print Receipt + Delete + Details */}
+                        <td className="py-3.5 px-4 align-middle text-right whitespace-nowrap">
+                          {confirmDeletePatientId === patient.id ? (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center justify-end gap-1.5 bg-red-50 border border-red-200 px-2 py-1 rounded-md"
                             >
-                              <Printer className="w-3 h-3 shrink-0" />
-                              <span>{t('queue.printReceiptBtn')}</span>
-                            </button>
+                              <span className="text-[11px] font-semibold text-red-800">
+                                {t('queue.confirmDeleteLabel')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmDeletePatientId(null);
+                                  onDeletePatient(patient.id);
+                                }}
+                                className="px-2 py-0.5 text-[11px] font-bold bg-red-600 text-white hover:bg-red-700 rounded transition-colors cursor-pointer"
+                              >
+                                {t('queue.confirmDeleteYes')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmDeletePatientId(null);
+                                }}
+                                className="px-2 py-0.5 text-[11px] font-medium bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 rounded transition-colors cursor-pointer"
+                              >
+                                {t('queue.cancelDeleteBtn')}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onPrintReceipt(patient.id, encounter.id);
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
+                                title={t('patientDetail.printSlipBtn')}
+                              >
+                                <Printer className="w-3 h-3 shrink-0" />
+                                <span>{t('queue.printReceiptBtn')}</span>
+                              </button>
 
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onSelectPatient(patient.id, encounter.id);
-                              }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
-                            >
-                              <span>{t('queue.detailsBtn')}</span>
-                              <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-                            </button>
-                          </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmDeletePatientId(patient.id);
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-700 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md transition-colors cursor-pointer"
+                                title={t('queue.deletePatientTooltip')}
+                              >
+                                <Trash2 className="w-3 h-3 shrink-0" />
+                                <span>{t('queue.deletePatientBtn')}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSelectPatient(patient.id, encounter.id);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
+                              >
+                                <span>{t('queue.detailsBtn')}</span>
+                                <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -692,20 +734,25 @@ export const QueueView: React.FC<QueueViewProps> = ({
                         </span>
                       )}
                     </div>
+
+                    <span className="text-xs font-medium text-slate-600 tabular-nums">
+                      {patient.age}
+                      {t('queue.yearsShort')} / {genderShort}
+                    </span>
                   </div>
 
+                  {/* Patient Name and ID only */}
                   <div className="mt-2">
-                    <div className="text-sm font-semibold text-slate-900">
-                      {patient.fullName} ({patient.age}
-                      {t('queue.yearsShort')} / {genderShort})
+                    <div className="text-sm font-semibold text-slate-900 leading-snug">
+                      {patient.fullName}
                     </div>
-                    <div className="text-xs text-slate-500 font-mono mt-0.5">
-                      {patient.id} · {encounter.receiptId} · {patient.village}
+                    <div className="text-xs font-mono font-medium text-slate-500 mt-0.5 tabular-nums">
+                      {patient.id}
                     </div>
                   </div>
 
                   {/* Vitals row */}
-                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-[11px] font-mono">
+                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-[11px] font-mono tabular-nums">
                     <span className="text-slate-500">{t('queue.vitalsLabel')}</span>
                     {vs.oxygenSaturation.isUnavailable || vs.oxygenSaturation.value === null ? (
                       <span className="text-amber-800">
@@ -717,7 +764,7 @@ export const QueueView: React.FC<QueueViewProps> = ({
                           vs.oxygenSaturation.value < 90 ? 'text-red-700 font-bold' : 'text-slate-700'
                         }`}
                       >
-                        {t('queue.spo2Label')} {vs.oxygenSaturation.value}%
+                        {t('queue.spo2Label')}: {vs.oxygenSaturation.value}%
                       </span>
                     )}
 
@@ -727,7 +774,7 @@ export const QueueView: React.FC<QueueViewProps> = ({
                       </span>
                     ) : (
                       <span className="text-slate-700">
-                        {t('queue.bpLabel')} {vs.systolicBP.value}/{vs.diastolicBP.value ?? '-'} mmHg
+                        {t('queue.bpLabel')}: {vs.systolicBP.value}/{vs.diastolicBP.value ?? '-'} mmHg
                       </span>
                     )}
 
@@ -737,32 +784,76 @@ export const QueueView: React.FC<QueueViewProps> = ({
                       </span>
                     ) : (
                       <span className="text-slate-700">
-                        {t('queue.pulseLabel')} {vs.pulseRate.value} bpm
+                        {t('queue.pulseLabel')}: {vs.pulseRate.value} bpm
                       </span>
                     )}
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between text-xs pt-2 border-t border-slate-100">
+                  <div className="mt-3 flex items-center justify-between text-xs pt-2 border-t border-slate-100 flex-wrap gap-2">
                     <span className="text-slate-500 text-[11px]">
                       {t('queue.statusPrefix')}{' '}
                       <strong className="text-slate-800">{localizedCareStatus}</strong>
                     </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPrintReceipt(patient.id, encounter.id);
-                        }}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded"
+                    {confirmDeletePatientId === patient.id ? (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1.5 bg-red-50 border border-red-200 px-2 py-1 rounded-md"
                       >
-                        <Printer className="w-3 h-3" />
-                        <span>{t('queue.printReceiptBtn')}</span>
-                      </button>
-                      <span className="text-blue-600 font-semibold flex items-center gap-0.5">
-                        {t('queue.detailsBtn')} <ChevronRight className="w-3.5 h-3.5" />
-                      </span>
-                    </div>
+                        <span className="text-[11px] font-semibold text-red-800">
+                          {t('queue.confirmDeleteLabel')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeletePatientId(null);
+                            onDeletePatient(patient.id);
+                          }}
+                          className="px-2 py-0.5 text-[11px] font-bold bg-red-600 text-white hover:bg-red-700 rounded cursor-pointer"
+                        >
+                          {t('queue.confirmDeleteYes')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeletePatientId(null);
+                          }}
+                          className="px-2 py-0.5 text-[11px] font-medium bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 rounded cursor-pointer"
+                        >
+                          {t('queue.cancelDeleteBtn')}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onPrintReceipt(patient.id, encounter.id);
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded cursor-pointer"
+                        >
+                          <Printer className="w-3 h-3" />
+                          <span>{t('queue.printReceiptBtn')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeletePatientId(patient.id);
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded cursor-pointer"
+                          title={t('queue.deletePatientTooltip')}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>{t('queue.deletePatientBtn')}</span>
+                        </button>
+                        <span className="text-blue-600 font-semibold flex items-center gap-0.5 ml-1">
+                          {t('queue.detailsBtn')} <ChevronRight className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

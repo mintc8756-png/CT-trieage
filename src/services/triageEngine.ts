@@ -13,7 +13,7 @@ import {
 } from '../types/triage';
 
 export const PROTOCOL_ID = 'IN-PHC-TRIAGE';
-export const PROTOCOL_VERSION = 'v2.4-DEMO';
+export const PROTOCOL_VERSION = 'v2.4';
 export const CLINICAL_DISCLAIMER =
   'This is a decision-support recommendation, not a diagnosis. A qualified clinician must assess the patient.';
 
@@ -230,51 +230,51 @@ export function evaluateVitalStatuses(vitals: VitalSigns): VitalStatus[] {
     }
   }
 
-  // 5. Body Temperature
+  // 5. Body Temperature (°F)
   if (vitals.temperature.isUnavailable || vitals.temperature.value === null) {
     result.push({
       name: 'Body Temperature',
       observed: 'UNAVAILABLE',
-      normalRange: '36.5°C – 37.5°C (97.7°F – 99.5°F)',
+      normalRange: '97.7°F – 99.5°F',
       status: 'MISSING',
       severityLevel: 'MISSING',
       ruleNotes: 'Thermometer reading unavailable'
     });
   } else {
-    const temp = vitals.temperature.value;
-    const tempF = (temp * 9 / 5 + 32).toFixed(1);
-    if (temp >= 39.5) {
+    const rawTemp = vitals.temperature.value;
+    const temp = rawTemp < 60 ? Number(((rawTemp * 9) / 5 + 32).toFixed(1)) : rawTemp;
+    if (temp >= 103.1) {
       result.push({
         name: 'Body Temperature',
-        observed: `${temp}°C (${tempF}°F)`,
-        normalRange: '36.5°C – 37.5°C',
+        observed: `${temp}°F`,
+        normalRange: '97.7°F – 99.5°F',
         status: 'CRITICAL',
         severityLevel: 'HUMAN_REVIEW_REQUIRED',
-        ruleNotes: 'Hyperpyrexia (≥39.5°C / 103.1°F)'
+        ruleNotes: 'Hyperpyrexia (≥103.1°F)'
       });
-    } else if (temp >= 38.3) {
+    } else if (temp >= 101.0) {
       result.push({
         name: 'Body Temperature',
-        observed: `${temp}°C (${tempF}°F)`,
-        normalRange: '36.5°C – 37.5°C',
+        observed: `${temp}°F`,
+        normalRange: '97.7°F – 99.5°F',
         status: 'ABNORMAL',
         severityLevel: 'HUMAN_REVIEW_REQUIRED',
-        ruleNotes: 'High fever (≥38.3°C / 101.0°F)'
+        ruleNotes: 'High fever (≥101.0°F)'
       });
-    } else if (temp <= 35.0) {
+    } else if (temp <= 95.0) {
       result.push({
         name: 'Body Temperature',
-        observed: `${temp}°C (${tempF}°F)`,
-        normalRange: '36.5°C – 37.5°C',
+        observed: `${temp}°F`,
+        normalRange: '97.7°F – 99.5°F',
         status: 'CRITICAL',
         severityLevel: 'HUMAN_REVIEW_REQUIRED',
-        ruleNotes: 'Hypothermia (≤35.0°C / 95.0°F)'
+        ruleNotes: 'Hypothermia (≤95.0°F)'
       });
     } else {
       result.push({
         name: 'Body Temperature',
-        observed: `${temp}°C (${tempF}°F)`,
-        normalRange: '36.5°C – 37.5°C',
+        observed: `${temp}°F`,
+        normalRange: '97.7°F – 99.5°F',
         status: 'NORMAL',
         severityLevel: 'NORMAL'
       });
@@ -450,40 +450,41 @@ export function evaluateTriage(input: AssessmentInput): TriageAssessment {
     }
   }
 
-  // Temperature
+  // Temperature (°F)
   if (!vs.temperature.isUnavailable && vs.temperature.value !== null) {
-    const temp = vs.temperature.value;
-    if (temp >= 39.5) {
+    const rawTemp = vs.temperature.value;
+    const temp = rawTemp < 60 ? Number(((rawTemp * 9) / 5 + 32).toFixed(1)) : rawTemp;
+    if (temp >= 103.1) {
       triggeredRules.push({
         ruleId: 'V-TEMP-REVIEW-HIGH',
-        criterion: 'Body Temperature ≥ 39.5°C (103.1°F)',
-        observedFinding: `Temperature is ${temp}°C`,
+        criterion: 'Body Temperature ≥ 103.1°F (Hyperpyrexia)',
+        observedFinding: `Temperature is ${temp}°F`,
         severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      const reason = `Hyperpyrexia (${temp}°C) requires direct clinician review.`;
+      const reason = `Hyperpyrexia (${temp}°F) requires direct clinician review.`;
       explanations.push(reason);
       humanReviewReasons.push(reason);
-    } else if (temp >= 38.3) {
+    } else if (temp >= 101.0) {
       triggeredRules.push({
         ruleId: 'V-TEMP-REVIEW-FEVER',
-        criterion: 'High Fever (38.3°C – 39.4°C)',
-        observedFinding: `Temperature is ${temp}°C`,
+        criterion: 'High Fever (101.0°F – 103.0°F)',
+        observedFinding: `Temperature is ${temp}°F`,
         severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      const reason = `High fever (${temp}°C) flagged for clinician review.`;
+      const reason = `High fever (${temp}°F) flagged for clinician review.`;
       explanations.push(reason);
       humanReviewReasons.push(reason);
-    } else if (temp <= 35.0) {
+    } else if (temp <= 95.0) {
       triggeredRules.push({
         ruleId: 'V-TEMP-REVIEW-LOW',
-        criterion: 'Body Temperature ≤ 35.0°C (Hypothermia)',
-        observedFinding: `Temperature is ${temp}°C`,
+        criterion: 'Body Temperature ≤ 95.0°F (Hypothermia)',
+        observedFinding: `Temperature is ${temp}°F`,
         severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       });
-      const reason = `Hypothermia (${temp}°C) requires warming and clinician review.`;
+      const reason = `Hypothermia (${temp}°F) requires warming and clinician review.`;
       explanations.push(reason);
       humanReviewReasons.push(reason);
     }

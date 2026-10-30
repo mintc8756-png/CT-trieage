@@ -1,0 +1,411 @@
+{
+  "entities": {
+    "StaffProfileDoc": {
+      "title": "StaffProfileDoc",
+      "description": "Authenticated rural health centre staff profile document.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique staff identifier."
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the staff member."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120,
+          "minLength": 1,
+          "description": "Display name of the clinician or health worker."
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "enum": [
+            "ANM (Auxiliary Nurse Midwife)",
+            "Staff Nurse",
+            "Medical Officer (Doctor)",
+            "ASHA Worker"
+          ],
+          "description": "Clinical designation."
+        },
+        "roleCategory": {
+          "type": "string",
+          "maxLength": 32,
+          "minLength": 1,
+          "enum": ["ASHA_NURSE", "DOCTOR"],
+          "description": "Role category for RBAC separation."
+        },
+        "registrationNumber": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Clinical registration or staff ID number."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "name",
+        "role",
+        "roleCategory",
+        "registrationNumber",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PatientDoc": {
+      "title": "PatientDoc",
+      "description": "Patient demographic registration record synced from the rural health centre.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Patient ID (e.g. PHC-2026-0101)."
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the owning clinical staff workspace."
+        },
+        "fullName": {
+          "type": "string",
+          "maxLength": 120,
+          "minLength": 1,
+          "description": "Patient full name."
+        },
+        "age": {
+          "type": "number",
+          "description": "Patient age in years (0 to 120)."
+        },
+        "gender": {
+          "type": "string",
+          "maxLength": 16,
+          "minLength": 1,
+          "enum": ["Male", "Female", "Other"],
+          "description": "Patient gender."
+        },
+        "village": {
+          "type": "string",
+          "maxLength": 120,
+          "minLength": 1,
+          "description": "Village or locality."
+        },
+        "preferredLanguage": {
+          "type": "string",
+          "maxLength": 8,
+          "minLength": 2,
+          "enum": ["en", "hi", "pa"],
+          "description": "Patient preferred communication language."
+        },
+        "registeredAt": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "description": "ISO timestamp of intake registration."
+        },
+        "registeredBy": {
+          "type": "string",
+          "maxLength": 120,
+          "minLength": 1,
+          "description": "Staff member who registered the patient."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "fullName",
+        "age",
+        "gender",
+        "village",
+        "preferredLanguage",
+        "registeredAt",
+        "registeredBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "EncounterDoc": {
+      "title": "EncounterDoc",
+      "description": "Patient clinical triage encounter record.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Encounter ID."
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the owning clinical staff workspace."
+        },
+        "patientId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Referenced Patient ID."
+        },
+        "receiptId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Printable clinical handover receipt number."
+        },
+        "chiefComplaint": {
+          "type": "string",
+          "maxLength": 500,
+          "minLength": 1,
+          "description": "Primary presenting complaint."
+        },
+        "duration": {
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1,
+          "description": "Symptom duration."
+        },
+        "onset": {
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1,
+          "description": "Symptom onset description."
+        },
+        "severity": {
+          "type": "string",
+          "maxLength": 32,
+          "minLength": 1,
+          "enum": ["Mild", "Moderate", "Severe"],
+          "description": "Presenting severity."
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "enum": [
+            "Awaiting Assessment",
+            "Under Clinical Review",
+            "Reassessment Required",
+            "Completed"
+          ],
+          "description": "Care workflow status."
+        },
+        "priority": {
+          "type": "string",
+          "maxLength": 32,
+          "minLength": 1,
+          "enum": ["EMERGENCY", "ROUTINE"],
+          "description": "Two-level clinical priority."
+        },
+        "assessmentStatus": {
+          "type": "string",
+          "maxLength": 32,
+          "minLength": 1,
+          "enum": ["ASSESSED", "HUMAN_REVIEW_REQUIRED"],
+          "description": "Assessment review status."
+        },
+        "syncStatus": {
+          "type": "string",
+          "maxLength": 32,
+          "minLength": 1,
+          "enum": ["LOCAL_ONLY", "PENDING_SYNC", "SYNCED", "SYNC_FAILED"],
+          "description": "Synchronization status."
+        },
+        "currentAssessmentId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Active triage assessment ID."
+        },
+        "arrivalTimestamp": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "description": "ISO arrival timestamp."
+        },
+        "registeredAt": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "description": "ISO registration timestamp."
+        },
+        "receiptGeneratedAt": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "description": "ISO receipt generation timestamp."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "patientId",
+        "receiptId",
+        "chiefComplaint",
+        "duration",
+        "onset",
+        "severity",
+        "status",
+        "priority",
+        "assessmentStatus",
+        "syncStatus",
+        "currentAssessmentId",
+        "arrivalTimestamp",
+        "registeredAt",
+        "receiptGeneratedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AuditLogDoc": {
+      "title": "AuditLogDoc",
+      "description": "Immutable clinical audit trail event.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Audit event ID."
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the actor."
+        },
+        "encounterId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Associated encounter ID or SYSTEM/DELETED."
+        },
+        "patientId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Associated patient ID or SYSTEM."
+        },
+        "eventTimestamp": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "description": "ISO timestamp when the clinical event occurred."
+        },
+        "actor": {
+          "type": "string",
+          "maxLength": 120,
+          "minLength": 1,
+          "description": "Name of the staff actor."
+        },
+        "actorRole": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "description": "Role of the staff actor."
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 120,
+          "minLength": 1,
+          "description": "Action label."
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 1000,
+          "minLength": 1,
+          "description": "Detailed audit description."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "encounterId",
+        "patientId",
+        "eventTimestamp",
+        "actor",
+        "actorRole",
+        "action",
+        "details",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/staffProfiles/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffProfileDoc" },
+      "description": "Authenticated rural health centre staff profiles."
+    },
+    "/patients/{patientId}": {
+      "schema": { "$ref": "#/entities/PatientDoc" },
+      "description": "Synchronized patient demographic records."
+    },
+    "/encounters/{encounterId}": {
+      "schema": { "$ref": "#/entities/EncounterDoc" },
+      "description": "Synchronized clinical triage encounters."
+    },
+    "/auditLogs/{auditId}": {
+      "schema": { "$ref": "#/entities/AuditLogDoc" },
+      "description": "Immutable clinical audit trail logs."
+    }
+  }
+}

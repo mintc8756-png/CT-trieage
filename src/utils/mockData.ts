@@ -10,25 +10,37 @@ export const INITIAL_STAFF_MEMBERS: StaffProfile[] = [
     id: 'STAFF-01',
     name: 'Sister Sunita Devi',
     role: 'ANM (Auxiliary Nurse Midwife)',
-    registrationNumber: 'ANM-UP-84920'
+    roleCategory: 'ASHA_NURSE',
+    registrationNumber: 'ANM-UP-84920',
+    email: 'sunita@phc.in',
+    password: 'nurse123'
   },
   {
     id: 'STAFF-02',
     name: 'Sister Anjali Rao',
     role: 'Staff Nurse',
-    registrationNumber: 'RN-MH-11930'
+    roleCategory: 'ASHA_NURSE',
+    registrationNumber: 'RN-MH-11930',
+    email: 'anjali@phc.in',
+    password: 'nurse123'
   },
   {
     id: 'STAFF-03',
     name: 'Dr. Rajesh Sharma',
     role: 'Medical Officer (Doctor)',
-    registrationNumber: 'MCI-2015-88432'
+    roleCategory: 'DOCTOR',
+    registrationNumber: 'MCI-2015-88432',
+    email: 'rajesh@phc.in',
+    password: 'doctor123'
   },
   {
     id: 'STAFF-04',
     name: 'Rekha Ben',
     role: 'ASHA Worker',
-    registrationNumber: 'ASHA-GJ-4412'
+    roleCategory: 'ASHA_NURSE',
+    registrationNumber: 'ASHA-GJ-4412',
+    email: 'rekha@phc.in',
+    password: 'asha123'
   }
 ];
 
@@ -143,7 +155,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
       'High-risk cardiac presentation: Immediate 12-lead ECG and emergency bed allocation indicated.'
     ],
     protocolId: 'IN-PHC-TRIAGE',
-    protocolVersion: 'v2.4-DEMO',
+    protocolVersion: 'v2.4',
     assessedAt: new Date(Date.now() - 47 * 60 * 1000).toISOString(),
     assessedBy: 'Sister Sunita Devi (ANM)',
     acknowledgedAt: new Date(Date.now() - 46 * 60 * 1000).toISOString(),
@@ -151,7 +163,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     acknowledgmentNotes: 'Oxygen administered @ 4L/min via nasal cannula. Medical Officer Dr. Sharma notified in OPD Room 1.'
   },
 
-  // Assessment 2: Priya Patel (ROUTINE + HUMAN_REVIEW_REQUIRED due to Hyperpyrexia 39.6°C & Tachycardia 118 bpm)
+  // Assessment 2: Priya Patel (ROUTINE + HUMAN_REVIEW_REQUIRED due to Hyperpyrexia 103.3°F & Tachycardia 118 bpm)
   {
     id: 'ASM-0102-1',
     encounterId: 'ENC-2026-0102',
@@ -162,8 +174,8 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     triggeredRules: [
       {
         ruleId: 'V-TEMP-REVIEW-HIGH',
-        criterion: 'Body Temperature ≥ 39.5°C (103.1°F)',
-        observedFinding: 'Temperature recorded at 39.6°C (103.3°F)',
+        criterion: 'Body Temperature ≥ 103.1°F (Hyperpyrexia)',
+        observedFinding: 'Temperature recorded at 103.3°F',
         severity: 'HUMAN_REVIEW_REQUIRED',
         category: 'Vitals'
       },
@@ -176,15 +188,15 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
       }
     ],
     explanation: [
-      'High fever (Hyperpyrexia): 39.6°C with tachycardia (118 bpm) and persistent rigors.',
+      'High fever (Hyperpyrexia): 103.3°F with tachycardia (118 bpm) and persistent rigors.',
       'Flagged for direct Medical Officer clinical review to screen for malaria, typhoid, or acute bacteremia.'
     ],
     missingInformation: [],
     requiresHumanReview: true,
-    humanReviewReason: 'Abnormal physiological parameters (Temp 39.6°C, Pulse 118 bpm) require direct clinician verification.',
+    humanReviewReason: 'Abnormal physiological parameters (Temp 103.3°F, Pulse 118 bpm) require direct clinician verification.',
     safetyWarnings: [],
     protocolId: 'IN-PHC-TRIAGE',
-    protocolVersion: 'v2.4-DEMO',
+    protocolVersion: 'v2.4',
     assessedAt: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
     assessedBy: 'Sister Sunita Devi (ANM)'
   },
@@ -206,7 +218,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     requiresHumanReview: false,
     safetyWarnings: [],
     protocolId: 'IN-PHC-TRIAGE',
-    protocolVersion: 'v2.4-DEMO',
+    protocolVersion: 'v2.4',
     assessedAt: new Date(Date.now() - 64 * 60 * 1000).toISOString(),
     assessedBy: 'Sister Anjali Rao (Staff Nurse)'
   },
@@ -252,7 +264,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
       'Immediate airway intervention required: Prepare emergency suction and bag-valve mask.'
     ],
     protocolId: 'IN-PHC-TRIAGE',
-    protocolVersion: 'v2.4-DEMO',
+    protocolVersion: 'v2.4',
     assessedAt: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
     assessedBy: 'Sister Sunita Devi (ANM)',
     acknowledgedAt: new Date(Date.now() - 13 * 60 * 1000).toISOString(),
@@ -288,7 +300,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
       'Human Review Required: Immediate manual palpation or Doppler assessment needed to rule out hypovolemic shock.'
     ],
     protocolId: 'IN-PHC-TRIAGE',
-    protocolVersion: 'v2.4-DEMO',
+    protocolVersion: 'v2.4',
     assessedAt: new Date(Date.now() - 24 * 60 * 1000).toISOString(),
     assessedBy: 'Rekha Ben (ASHA Worker)'
   },
@@ -310,7 +322,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
     requiresHumanReview: false,
     safetyWarnings: [],
     protocolId: 'IN-PHC-TRIAGE',
-    protocolVersion: 'v2.4-DEMO',
+    protocolVersion: 'v2.4',
     assessedAt: new Date(Date.now() - 74 * 60 * 1000).toISOString(),
     assessedBy: 'Sister Anjali Rao (Staff Nurse)'
   },
@@ -349,7 +361,7 @@ export const CANONICAL_ASSESSMENTS: TriageAssessment[] = [
       'Priority Escalated: Routine ➔ EMERGENCY due to acute clinical deterioration.'
     ],
     protocolId: 'IN-PHC-TRIAGE',
-    protocolVersion: 'v2.4-DEMO',
+    protocolVersion: 'v2.4',
     assessedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
     assessedBy: 'Sister Anjali Rao (Staff Nurse)',
     acknowledgedAt: new Date(Date.now() - 9 * 60 * 1000).toISOString(),
@@ -381,7 +393,7 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
       systolicBP: { value: 154, unit: 'mmHg', isUnavailable: false },
       diastolicBP: { value: 96, unit: 'mmHg', isUnavailable: false },
       oxygenSaturation: { value: 88, unit: '%', isUnavailable: false },
-      temperature: { value: 37.0, unit: '°C', isUnavailable: false },
+      temperature: { value: 98.6, unit: '°F', isUnavailable: false },
       pulseRate: { value: 98, unit: 'bpm', isUnavailable: false },
       respiratoryRate: { value: 24, unit: 'breaths/min', isUnavailable: false },
       measuredAt: new Date(Date.now() - 48 * 60 * 1000).toISOString(),
@@ -419,7 +431,7 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
       systolicBP: { value: 114, unit: 'mmHg', isUnavailable: false },
       diastolicBP: { value: 74, unit: 'mmHg', isUnavailable: false },
       oxygenSaturation: { value: 97, unit: '%', isUnavailable: false },
-      temperature: { value: 39.6, unit: '°C', isUnavailable: false },
+      temperature: { value: 103.3, unit: '°F', isUnavailable: false },
       pulseRate: { value: 118, unit: 'bpm', isUnavailable: false },
       respiratoryRate: { value: 20, unit: 'breaths/min', isUnavailable: false },
       measuredAt: new Date(Date.now() - 32 * 60 * 1000).toISOString(),
@@ -457,7 +469,7 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
       systolicBP: { value: 118, unit: 'mmHg', isUnavailable: false },
       diastolicBP: { value: 76, unit: 'mmHg', isUnavailable: false },
       oxygenSaturation: { value: 98, unit: '%', isUnavailable: false },
-      temperature: { value: 36.8, unit: '°C', isUnavailable: false },
+      temperature: { value: 98.2, unit: '°F', isUnavailable: false },
       pulseRate: { value: 72, unit: 'bpm', isUnavailable: false },
       respiratoryRate: { value: 16, unit: 'breaths/min', isUnavailable: false },
       measuredAt: new Date(Date.now() - 65 * 60 * 1000).toISOString(),
@@ -495,7 +507,7 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
       systolicBP: { value: 142, unit: 'mmHg', isUnavailable: false },
       diastolicBP: { value: 88, unit: 'mmHg', isUnavailable: false },
       oxygenSaturation: { value: 84, unit: '%', isUnavailable: false },
-      temperature: { value: 37.1, unit: '°C', isUnavailable: false },
+      temperature: { value: 98.8, unit: '°F', isUnavailable: false },
       pulseRate: { value: 126, unit: 'bpm', isUnavailable: false },
       respiratoryRate: { value: 34, unit: 'breaths/min', isUnavailable: false },
       measuredAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
@@ -533,7 +545,7 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
       systolicBP: { value: null, unit: 'mmHg', isUnavailable: true, unavailableReason: 'Cuff deflation error, radial pulse barely palpable' },
       diastolicBP: { value: null, unit: 'mmHg', isUnavailable: true, unavailableReason: 'Cuff deflation error' },
       oxygenSaturation: { value: 95, unit: '%', isUnavailable: false },
-      temperature: { value: 36.6, unit: '°C', isUnavailable: false },
+      temperature: { value: 97.9, unit: '°F', isUnavailable: false },
       pulseRate: { value: null, unit: 'bpm', isUnavailable: true, unavailableReason: 'Severe thready pulse, unpalpable manually' },
       respiratoryRate: { value: 20, unit: 'breaths/min', isUnavailable: false },
       measuredAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
@@ -571,7 +583,7 @@ export const CANONICAL_ENCOUNTERS: Encounter[] = [
       systolicBP: { value: 138, unit: 'mmHg', isUnavailable: false },
       diastolicBP: { value: 86, unit: 'mmHg', isUnavailable: false },
       oxygenSaturation: { value: 89, unit: '%', isUnavailable: false },
-      temperature: { value: 38.6, unit: '°C', isUnavailable: false },
+      temperature: { value: 101.5, unit: '°F', isUnavailable: false },
       pulseRate: { value: 110, unit: 'bpm', isUnavailable: false },
       respiratoryRate: { value: 28, unit: 'breaths/min', isUnavailable: false },
       measuredAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),

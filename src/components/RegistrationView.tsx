@@ -7,6 +7,7 @@ import {
   TriageAssessment
 } from '../types/triage';
 import { evaluateTriage } from '../services/triageEngine';
+import { repository } from '../services/patientRepository';
 import { useI18n } from '../i18n';
 import {
   Check,
@@ -60,16 +61,8 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
 }) => {
   const { t, dict } = useI18n();
 
-  // Generate unique Patient ID and Receipt ID on form open, and capture original arrival time
-  const [patientId] = useState(() => {
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    return `PHC-2026-${randomNum}`;
-  });
-
-  const [receiptId] = useState(() => {
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    return `RCP-2026-${randomNum}`;
-  });
+  // Generate sequential 4-digit Patient ID and Receipt ID on form open, and capture original arrival time
+  const [{ patientId, receiptId }] = useState(() => repository.getNextRegistrationIds());
 
   const [arrivalTimestamp] = useState(() => new Date().toISOString());
 
@@ -152,7 +145,7 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
     }
     if (!tempUnavailable && temp) {
       const v = Number(temp);
-      if (isNaN(v) || v < 30 || v > 44) newErrors.temp = 'registration.errors.temp';
+      if (isNaN(v) || v < 86 || v > 111.2) newErrors.temp = 'registration.errors.temp';
     }
     if (!pulseUnavailable && pulse) {
       const v = Number(pulse);
@@ -176,9 +169,16 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
 
     const nowIso = new Date().toISOString();
 
+    const normalizedFullName = fullName
+      .trim()
+      .replace(/\s+/g, ' ')
+      .split(' ')
+      .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : ''))
+      .join(' ');
+
     const patientRecord: Patient = {
       id: patientId,
-      fullName: fullName.trim(),
+      fullName: normalizedFullName,
       age: parseInt(age, 10),
       gender,
       village: village.trim(),
@@ -208,7 +208,7 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
       },
       temperature: {
         value: tempUnavailable || !temp ? null : Number(temp),
-        unit: '°C',
+        unit: '°F',
         isUnavailable: tempUnavailable
       },
       pulseRate: {

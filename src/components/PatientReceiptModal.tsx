@@ -220,8 +220,8 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
       t('vitalsNames.Body Temperature'),
       vs.temperature.value,
       vs.temperature.isUnavailable,
-      '°C',
-      '36.5–37.5',
+      '°F',
+      '97.7–99.5',
       vitalStatuses.find(v => v.name === 'Body Temperature')
     )
   ];

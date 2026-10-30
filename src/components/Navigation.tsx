@@ -8,12 +8,14 @@ interface NavigationProps {
   activeTab: ActiveTab;
   onTabChange: (tab: ActiveTab) => void;
   activeEmergencyCount: number;
+  isDoctor?: boolean;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
   activeTab,
   onTabChange,
-  activeEmergencyCount
+  activeEmergencyCount,
+  isDoctor = false
 }) => {
   const { t } = useI18n();
 
@@ -26,7 +28,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   const tabs = [
     {
       id: 'queue' as ActiveTab,
-      label: t('nav.liveQueue'),
+      label: isDoctor ? t('auth.doctorQueueTab') : t('nav.liveQueue'),
       icon: Users,
       badge: formatEmergencyLabel(activeEmergencyCount),
       badgeColor:
@@ -34,41 +36,55 @@ export const Navigation: React.FC<NavigationProps> = ({
           ? 'bg-red-50 text-red-700 border border-red-200'
           : 'bg-slate-100 text-slate-600 border border-slate-200'
     },
-    {
-      id: 'register' as ActiveTab,
-      label: t('nav.newRegistration'),
-      icon: UserPlus,
-      badge: null,
-      badgeColor: ''
-    }
+    ...(!isDoctor
+      ? [
+          {
+            id: 'register' as ActiveTab,
+            label: t('nav.newRegistration'),
+            icon: UserPlus,
+            badge: null,
+            badgeColor: ''
+          }
+        ]
+      : [])
   ];
 
   return (
     <nav className="bg-white border-b border-slate-200 no-print">
-      <div className="app-container flex items-center gap-2 overflow-x-auto py-0.5 scrollbar-none">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={`flex items-center gap-2 px-3 sm:px-3.5 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
-                isActive
-                  ? 'border-blue-600 text-blue-700 font-semibold'
-                  : 'border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300'
-              }`}
-            >
-              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
-              <span>{tab.label}</span>
-              {tab.badge && (
-                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-sm tabular-nums ${tab.badgeColor}`}>
-                  {tab.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <div className="app-container flex items-center justify-between gap-2 overflow-x-auto py-0.5 scrollbar-none">
+        <div className="flex items-center gap-2">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => onTabChange(tab.id)}
+                className={`flex items-center gap-2 px-3 sm:px-3.5 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'border-blue-600 text-blue-700 font-semibold'
+                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300'
+                }`}
+              >
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
+                <span>{tab.label}</span>
+                {tab.badge && (
+                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-sm tabular-nums ${tab.badgeColor}`}>
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 py-2">
+          <span className="font-semibold text-slate-700">
+            {isDoctor ? t('auth.roleDoctor') : t('auth.roleAshaNurse')}
+          </span>
+          <span>·</span>
+          <span>{isDoctor ? t('auth.roleDoctorDesc') : t('auth.roleAshaNurseDesc')}</span>
+        </div>
       </div>
     </nav>
   );

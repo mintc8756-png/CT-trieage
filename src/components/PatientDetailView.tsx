@@ -19,7 +19,8 @@ import {
   RotateCcw,
   Edit3,
   FileText,
-  Info
+  Info,
+  Trash2
 } from 'lucide-react';
 
 interface PatientDetailViewProps {
@@ -29,6 +30,7 @@ interface PatientDetailViewProps {
   auditLogs: AuditEvent[];
   onBack: () => void;
   onOpenReceipt: () => void;
+  onDeletePatient: (patientId: string) => void;
   onUpdateStatus: (newStatus: CareStatus) => void;
   onRecordReassessment: (newVitals: VitalSigns, newSymptoms: string[], updatedNotes: string) => void;
   onClinicianOverride: (newPriority: ClinicalPriority, justification: string) => void;
@@ -41,11 +43,13 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
   auditLogs,
   onBack,
   onOpenReceipt,
+  onDeletePatient,
   onUpdateStatus,
   onRecordReassessment,
   onClinicianOverride
 }) => {
   const { t, dict } = useI18n();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const currentAssessment =
     encounter.assessmentHistory.find(a => a.id === encounter.currentAssessmentId) ||
@@ -125,7 +129,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
       },
       temperature: {
         value: reassessTempUnavail || !reassessTemp ? null : Number(reassessTemp),
-        unit: '°C',
+        unit: '°F',
         isUnavailable: reassessTempUnavail
       },
       pulseRate: {
@@ -193,18 +197,25 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
             <span>{t('patientDetail.recordReassessmentBtn')}</span>
           </button>
 
-          {/* Clinician Override Button */}
-          <button
-            onClick={() => {
-              setOverrideError(null);
-              setOverridePriority(encounter.priority === 'EMERGENCY' ? 'ROUTINE' : 'EMERGENCY');
-              setShowOverrideModal(true);
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 rounded-md text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>{t('patientDetail.clinicianOverrideBtn')}</span>
-          </button>
+          {/* Clinician Override Button (Doctor Only) */}
+          {currentStaff.roleCategory === 'DOCTOR' ||
+          currentStaff.role === 'Medical Officer (Doctor)' ? (
+            <button
+              onClick={() => {
+                setOverrideError(null);
+                setOverridePriority(encounter.priority === 'EMERGENCY' ? 'ROUTINE' : 'EMERGENCY');
+                setShowOverrideModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 rounded-md text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{t('patientDetail.clinicianOverrideBtn')}</span>
+            </button>
+          ) : (
+            <span className="text-[11px] text-slate-500 px-2 py-1">
+              {t('auth.doctorOnlyOverrideNotice')}
+            </span>
+          )}
 
           {/* Print Patient Receipt / Print Latest Receipt */}
           <button
@@ -218,6 +229,38 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                 : t('patientDetail.printSlipBtn')}
             </span>
           </button>
+
+          {/* Delete Patient Action */}
+          {confirmingDelete ? (
+            <div className="inline-flex items-center gap-1.5 bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+              <span className="text-xs font-semibold text-red-800">
+                {t('patientDetail.confirmDeleteLabel')}
+              </span>
+              <button
+                type="button"
+                onClick={() => onDeletePatient(patient.id)}
+                className="px-2.5 py-1 text-xs font-bold bg-red-600 text-white hover:bg-red-700 rounded transition-colors cursor-pointer"
+              >
+                {t('patientDetail.confirmDeleteYes')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                className="px-2.5 py-1 text-xs font-medium bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 rounded transition-colors cursor-pointer"
+              >
+                {t('patientDetail.cancelDeleteBtn')}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 rounded-md text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{t('patientDetail.deletePatientBtn')}</span>
+            </button>
+          )}
         </div>
       </div>
 
