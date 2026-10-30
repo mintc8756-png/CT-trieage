@@ -30,7 +30,6 @@ Rural health facilities face three recurring operational bottlenecks at registra
 | **Typography** | **Plus Jakarta Sans**, **DM Sans**, **JetBrains Mono** | Scannable headings, legible clinical prose, and tabular numerals (`tabular-nums`) for vital sign alignment. |
 | **Iconography** | **Lucide React** (`lucide-react`) | Crisp SVG icons paired with text labels so clinical urgency is never communicated by color alone. |
 | **Offline Database** | **Browser IndexedDB API** (`AITriage_RuralPHC_DB`) | Client-side transactional NoSQL database with 4 object stores (`patients`, `encounters`, `assessments`, `auditLogs`) + `localStorage` fallback. |
-| **Voice & Hardware APIs** | **Web Speech API** (`SpeechRecognition`) | Hands-free voice dictation in English (`en-IN`) and Hindi (`hi-IN`) with mandatory staff review. |
 | **Build Tooling** | **Vite 8** (`vite`, `@vitejs/plugin-react`) | Fast ES module bundling and local development server. |
 
 ---
