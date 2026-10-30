@@ -122,20 +122,7 @@ Every registered encounter generates a unique receipt number (`RCP-2026-XXXX`) a
 
 ---
 
-## 8. Pre-Loaded Clinical Demonstration Scenarios
-
-| Case | Patient ID & Receipt | Name & Age/Sex | Presentation & Vitals | Priority & Assessment Status | Clinical Feature Demonstrated |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **1** | `PHC-2026-0101`<br>`RCP-2026-0101` | **Ramesh Kumar**<br>58y / M | Retrosternal chest pain radiating to left arm, cold sweats.<br>$\text{SpO}_2\ 88\%$, $\text{BP}\ 154/96\ \text{mmHg}$ | **EMERGENCY** · `ASSESSED` | High-risk combination (`COMB-CHEST-HYPOXIA`) + Mandatory Red-Flag Acknowledgement. |
-| **2** | `PHC-2026-0102`<br>`RCP-2026-0102` | **Priya Patel**<br>34y / F | 3-day high fever with rigors.<br>$\text{Temp}\ 39.6^\circ\text{C}$, $\text{Pulse}\ 118\ \text{bpm}$ | **EMERGENCY** · `ASSESSED` | Critical hyperpyrexia (`V-TEMP-EMERGENCY-HIGH`, $\ge 39.5^\circ\text{C}$) + tachycardia. |
-| **3** | `PHC-2026-0103`<br>`RCP-2026-0103` | **Anil Sharma**<br>22y / M | Mild dry cough & cold for 5 days.<br>$\text{SpO}_2\ 98\%$, $\text{BP}\ 118/76\ \text{mmHg}$, $\text{HR}\ 72\ \text{bpm}$ | **ROUTINE** · `ASSESSED` | Normal physiological parameters; standard outpatient queue placement. |
-| **4** | `PHC-2026-0104`<br>`RCP-2026-0104` | **Meena Bai**<br>45y / F | Severe acute breathlessness, audible stridor.<br>$\text{SpO}_2\ 84\%$, $\text{RR}\ 34\ \text{breaths/min}$ | **EMERGENCY** · `ASSESSED` | Acute airway & respiratory emergency (`SYMP-AIRWAY-EMERGENCY`). |
-| **5** | `PHC-2026-0105`<br>`RCP-2026-0105` | **Sunil Verma**<br>36y / M | Repeated vomiting, severe dizziness, dehydration.<br>$\text{BP}$ & $\text{Pulse}$ marked **UNAVAILABLE** | **ROUTINE** · `HUMAN_REVIEW_REQUIRED` | Missing vital signs safeguard (`SAFETY-INCOMPLETE-DATA`); prevents silent normal Routine classification. |
-| **6** | `PHC-2026-0106`<br>`RCP-2026-0106` | **Kavita Devi**<br>40y / F | Initial intake: Routine viral fever ($\text{SpO}_2\ 96\%$).<br>Reassessment: $\text{SpO}_2$ dropped to $89\%$, $\text{RR}\ 28$. | **EMERGENCY** · `ASSESSED` (v2) | Longitudinal reassessment workflow (`v1 Routine` ➔ `v2 Emergency`). |
-
----
-
-## 9. File & Directory Structure
+## 8. File & Directory Structure
 
 ```text
 /
