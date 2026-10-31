@@ -2,20 +2,22 @@ import React from 'react';
 import { StaffProfile, SupportedLanguage } from '../types/triage';
 import { useI18n } from '../i18n';
 import { isDoctorRole } from './AuthView';
-import { Wifi, WifiOff, Plus, User, Globe, LogOut } from 'lucide-react';
+import { Wifi, WifiOff, Plus, User, Globe, LogOut, Presentation } from 'lucide-react';
 
 interface HeaderProps {
   currentStaff: StaffProfile;
   isOnline: boolean;
   onRegisterClick: () => void;
   onSignOut: () => void;
+  onOpenPitchDeck?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentStaff,
   isOnline,
   onRegisterClick,
-  onSignOut
+  onSignOut,
+  onOpenPitchDeck
 }) => {
   const { language, setLanguage, t, dict } = useI18n();
   const isDoctor = isDoctorRole(currentStaff);
@@ -42,6 +44,22 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Connectivity & Operational Controls */}
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Hackathon Pitch Deck (6 Slides) Button */}
+          {onOpenPitchDeck && (
+            <button
+              type="button"
+              onClick={onOpenPitchDeck}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+              title="Open Hackathon Pitch Deck (6 Slides, Speaker Notes, Print)"
+            >
+              <Presentation className="w-3.5 h-3.5 text-purple-700 shrink-0" />
+              <span>Pitch Deck</span>
+              <span className="hidden sm:inline-block text-[10px] bg-purple-200/80 text-purple-800 px-1 py-0.2 rounded font-mono">
+                6 Slides
+              </span>
+            </button>
+          )}
+
           {/* Live Network Connectivity Status Indicator */}
           <div
             role="status"

@@ -28,6 +28,7 @@ import { SyncCenterView } from './components/SyncCenterView';
 import { RedFlagAlertModal } from './components/RedFlagAlertModal';
 import { AssessmentSummaryView } from './components/AssessmentSummaryView';
 import { PatientReceiptModal } from './components/PatientReceiptModal';
+import { PitchDeckModal } from './components/PitchDeckModal';
 import { AuthView, isDoctorRole } from './components/AuthView';
 import { evaluateTriage } from './services/triageEngine';
 import { I18nProvider, useI18n } from './i18n';
@@ -116,6 +117,9 @@ function AppShell() {
     encounterId: string;
     fromRegistration?: boolean;
   } | null>(null);
+
+  // Hackathon 6-Slide Pitch Deck Presentation modal state
+  const [isPitchDeckOpen, setIsPitchDeckOpen] = useState<boolean>(false);
 
   // Refresh reactive state from repository
   const refreshState = useCallback(() => {
