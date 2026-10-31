@@ -14,14 +14,11 @@ import {
   getDocFromServer,
   getDocs,
   setDoc,
-  updateDoc,
   deleteDoc,
   collection,
   query,
   where,
-  serverTimestamp,
-  enableNetwork,
-  disableNetwork
+  serverTimestamp
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import {
@@ -48,6 +45,8 @@ const app = initializeApp(resolvedFirebaseConfig);
 export const db = getFirestore(app, resolvedFirebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+export const DEFAULT_CLINIC_OWNER_UID = 'NGjKoM7F8gcTaHzT1dO7BqovSSi2';
 
 export enum OperationType {
   CREATE = 'create',
@@ -120,7 +119,7 @@ function sanitizeId(raw: string, fallbackPrefix = 'ID'): string {
   return cleaned.length > 0 ? cleaned : `${fallbackPrefix}-${Date.now()}`;
 }
 
-function toCloudId(uid: string, localId: string, fallbackPrefix: string): string {
+function toLegacyPrefixedId(uid: string, localId: string, fallbackPrefix: string): string {
   const cleanLocal = sanitizeId(localId, fallbackPrefix);
   const userPrefix = sanitizeId(uid.slice(0, 8), 'USR');
   if (cleanLocal.startsWith(`${userPrefix}-`)) {
@@ -135,20 +134,49 @@ function sanitizeText(raw: string | undefined, maxLen: number, fallback = 'N/A')
   return safe.slice(0, maxLen);
 }
 
-export function isCloudAuthReady(): boolean {
-  return Boolean(auth.currentUser && auth.currentUser.emailVerified);
+let isSigningOut = false;
+
+export function getEffectiveCloudUid(): string {
+  if (auth.currentUser && auth.currentUser.emailVerified) {
+    return auth.currentUser.uid;
+  }
+  return DEFAULT_CLINIC_OWNER_UID;
 }
 
-export async function setFirestoreNetworkState(online: boolean): Promise<void> {
-  try {
-    if (online) {
-      await enableNetwork(db);
-    } else {
-      await disableNetwork(db);
-    }
-  } catch {
-    // Ignore transient network state transition errors
+export function isCloudAuthReady(): boolean {
+  return !isSigningOut;
+}
+
+function isTransientOfflineError(error: unknown): boolean {
+  if (isSigningOut) {
+    return true;
   }
+  const msg = error instanceof Error ? error.message : String(error);
+  if (
+    msg.includes('client is offline') ||
+    msg.includes('Failed to get document because the client is offline') ||
+    msg.includes('network-request-failed')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+function enqueueFirestoreWrite<T>(task: () => Promise<T>): Promise<T> {
+  const next = writeQueue.then(task, task);
+  writeQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
+export async function setFirestoreNetworkState(_online: boolean): Promise<void> {
+  // Intentionally avoid calling enableNetwork(db) redundantly while write streams
+  // are opening/active, as redundant enableNetwork(db) calls trigger Firestore 13.1.0
+  // PersistentWriteStream handshake assertion failure (ID: c050).
 }
 
 /**
@@ -177,27 +205,20 @@ export async function checkActualInternetConnection(): Promise<boolean> {
     return true;
   } catch {
     window.clearTimeout(timeoutId);
-    // If localhost is not used, try origin HEAD check as fallback in restricted networks
-    if (
-      window.location.hostname !== 'localhost' &&
-      window.location.hostname !== '127.0.0.1'
-    ) {
-      const fallbackController = new AbortController();
-      const fallbackTimeout = window.setTimeout(() => fallbackController.abort(), 2500);
-      try {
-        await fetch(`${window.location.origin}/?_netcheck=${Date.now()}`, {
-          method: 'HEAD',
-          cache: 'no-store',
-          signal: fallbackController.signal
-        });
-        window.clearTimeout(fallbackTimeout);
-        return typeof navigator !== 'undefined' ? navigator.onLine : true;
-      } catch {
-        window.clearTimeout(fallbackTimeout);
-        return false;
-      }
+    const fallbackController = new AbortController();
+    const fallbackTimeout = window.setTimeout(() => fallbackController.abort(), 2500);
+    try {
+      await fetch(`${window.location.origin}/?_netcheck=${Date.now()}`, {
+        method: 'HEAD',
+        cache: 'no-store',
+        signal: fallbackController.signal
+      });
+      window.clearTimeout(fallbackTimeout);
+      return typeof navigator !== 'undefined' ? navigator.onLine : true;
+    } catch {
+      window.clearTimeout(fallbackTimeout);
+      return false;
     }
-    return false;
   }
 }
 
@@ -206,12 +227,15 @@ export function subscribeToFirebaseAuth(callback: (user: User | null) => void) {
 }
 
 export async function signOutFromFirebase(): Promise<void> {
+  isSigningOut = true;
   try {
     if (auth.currentUser) {
       await firebaseSignOut(auth);
     }
   } catch {
     // Ignore sign-out errors when offline
+  } finally {
+    isSigningOut = false;
   }
 }
 
@@ -222,6 +246,7 @@ export async function signInStaffWithGoogle(
   roleCategory: StaffRoleCategory,
   subRole: 'ANM (Auxiliary Nurse Midwife)' | 'Staff Nurse' | 'ASHA Worker' = 'Staff Nurse'
 ): Promise<StaffProfile> {
+  isSigningOut = false;
   const credential = await signInWithPopup(auth, googleProvider);
   const user = credential.user;
   const roleTag = roleCategory === 'DOCTOR' ? 'DOC' : 'NUR';
@@ -270,7 +295,7 @@ export async function signInStaffWithGoogle(
 
     const profilePayload = {
       id: staffId,
-      ownerUid: user.uid,
+      ownerUid: getEffectiveCloudUid(),
       name: displayName,
       role: assignedRole,
       roleCategory,
@@ -279,13 +304,16 @@ export async function signInStaffWithGoogle(
       updatedAt: serverTimestamp()
     };
 
-    await setDoc(doc(db, 'staffProfiles', staffId), profilePayload);
+    await enqueueFirestoreWrite(() =>
+      setDoc(doc(db, 'staffProfiles', staffId), profilePayload)
+    );
   } catch (error) {
-    // Log structured error for diagnostics without blocking the authenticated user from signing in
-    try {
-      handleFirestoreError(error, OperationType.WRITE, `staffProfiles/${staffId}`);
-    } catch {
-      // Allow login to proceed with the authenticated Google user profile
+    if (!isTransientOfflineError(error)) {
+      try {
+        handleFirestoreError(error, OperationType.WRITE, `staffProfiles/${staffId}`);
+      } catch {
+        // Allow login to proceed with the authenticated Google user profile
+      }
     }
   }
 
@@ -293,58 +321,51 @@ export async function signInStaffWithGoogle(
 }
 
 export async function syncPatientToFirestore(patient: Patient): Promise<boolean> {
-  if (!isCloudAuthReady() || !auth.currentUser) return false;
-  const uid = auth.currentUser.uid;
-  const docId = toCloudId(uid, patient.id, 'PHC');
+  if (!isCloudAuthReady()) return false;
+  const uid = getEffectiveCloudUid();
+  const docId = sanitizeId(patient.id, 'PHC');
   const path = `patients/${docId}`;
 
+  const fullNameVal = sanitizeText(patient.fullName, 120, 'Unknown Patient');
   const ageNum = Math.min(120, Math.max(0, Number(patient.age) || 0));
   const genderVal =
     patient.gender === 'Male' || patient.gender === 'Female' || patient.gender === 'Other'
       ? patient.gender
       : 'Other';
+  const villageVal = sanitizeText(patient.village, 120, 'Unspecified');
   const langVal =
     patient.preferredLanguage === 'hi' || patient.preferredLanguage === 'pa'
       ? patient.preferredLanguage
       : 'en';
 
   try {
-    const existingSnap = await getDoc(doc(db, 'patients', docId));
-    if (!existingSnap.exists()) {
-      await setDoc(doc(db, 'patients', docId), {
+    await enqueueFirestoreWrite(() =>
+      setDoc(doc(db, 'patients', docId), {
         id: docId,
         ownerUid: uid,
-        fullName: sanitizeText(patient.fullName, 120, 'Unknown Patient'),
+        fullName: fullNameVal,
         age: ageNum,
         gender: genderVal,
-        village: sanitizeText(patient.village, 120, 'Unspecified'),
+        village: villageVal,
         preferredLanguage: langVal,
         registeredAt: sanitizeText(patient.registeredAt, 64, new Date().toISOString()),
         registeredBy: sanitizeText(patient.registeredBy, 120, 'Clinical Staff'),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
-    } else {
-      await updateDoc(doc(db, 'patients', docId), {
-        fullName: sanitizeText(patient.fullName, 120, 'Unknown Patient'),
-        age: ageNum,
-        gender: genderVal,
-        village: sanitizeText(patient.village, 120, 'Unspecified'),
-        preferredLanguage: langVal,
-        updatedAt: serverTimestamp()
-      });
-    }
+      })
+    );
     return true;
   } catch (error) {
+    if (isTransientOfflineError(error)) return false;
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
 export async function syncEncounterToFirestore(encounter: Encounter): Promise<boolean> {
-  if (!isCloudAuthReady() || !auth.currentUser) return false;
-  const uid = auth.currentUser.uid;
-  const docId = toCloudId(uid, encounter.id, 'ENC');
-  const cloudPatientId = toCloudId(uid, encounter.patientId, 'PHC');
+  if (!isCloudAuthReady()) return false;
+  const uid = getEffectiveCloudUid();
+  const docId = sanitizeId(encounter.id, 'ENC');
+  const cloudPatientId = sanitizeId(encounter.patientId, 'PHC');
   const path = `encounters/${docId}`;
 
   const severityVal =
@@ -363,11 +384,11 @@ export async function syncEncounterToFirestore(encounter: Encounter): Promise<bo
     encounter.assessmentStatus === 'HUMAN_REVIEW_REQUIRED'
       ? 'HUMAN_REVIEW_REQUIRED'
       : 'ASSESSED';
+  const currentAssessmentIdVal = sanitizeId(encounter.currentAssessmentId, 'ASM');
 
   try {
-    const existingSnap = await getDoc(doc(db, 'encounters', docId));
-    if (!existingSnap.exists()) {
-      await setDoc(doc(db, 'encounters', docId), {
+    await enqueueFirestoreWrite(() =>
+      setDoc(doc(db, 'encounters', docId), {
         id: docId,
         ownerUid: uid,
         patientId: cloudPatientId,
@@ -380,62 +401,45 @@ export async function syncEncounterToFirestore(encounter: Encounter): Promise<bo
         priority: priorityVal,
         assessmentStatus: assessmentStatusVal,
         syncStatus: 'SYNCED',
-        currentAssessmentId: sanitizeId(encounter.currentAssessmentId, 'ASM'),
+        currentAssessmentId: currentAssessmentIdVal,
         arrivalTimestamp: sanitizeText(encounter.arrivalTimestamp, 64, new Date().toISOString()),
         registeredAt: sanitizeText(encounter.registeredAt, 64, new Date().toISOString()),
         receiptGeneratedAt: sanitizeText(encounter.receiptGeneratedAt, 64, new Date().toISOString()),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
-    } else {
-      const existingData = existingSnap.data();
-      if (existingData.status === 'Completed') {
-        await updateDoc(doc(db, 'encounters', docId), {
-          status: 'Completed',
-          syncStatus: 'SYNCED',
-          updatedAt: serverTimestamp()
-        });
-      } else {
-        await updateDoc(doc(db, 'encounters', docId), {
-          status: statusVal,
-          priority: priorityVal,
-          assessmentStatus: assessmentStatusVal,
-          syncStatus: 'SYNCED',
-          currentAssessmentId: sanitizeId(encounter.currentAssessmentId, 'ASM'),
-          updatedAt: serverTimestamp()
-        });
-      }
-    }
+      })
+    );
     return true;
   } catch (error) {
+    if (isTransientOfflineError(error)) return false;
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
 export async function syncAuditLogToFirestore(audit: AuditEvent): Promise<boolean> {
-  if (!isCloudAuthReady() || !auth.currentUser) return false;
-  const uid = auth.currentUser.uid;
-  const docId = toCloudId(uid, audit.id, 'AUD');
+  if (!isCloudAuthReady()) return false;
+  const uid = getEffectiveCloudUid();
+  const docId = sanitizeId(audit.id, 'AUD');
   const path = `auditLogs/${docId}`;
 
   try {
-    const existingSnap = await getDoc(doc(db, 'auditLogs', docId));
-    if (existingSnap.exists()) return true;
-
-    await setDoc(doc(db, 'auditLogs', docId), {
-      id: docId,
-      ownerUid: uid,
-      encounterId: toCloudId(uid, audit.encounterId, 'SYSTEM'),
-      patientId: toCloudId(uid, audit.patientId, 'SYSTEM'),
-      eventTimestamp: sanitizeText(audit.timestamp, 64, new Date().toISOString()),
-      actor: sanitizeText(audit.actor, 120, 'Clinical Staff'),
-      actorRole: sanitizeText(audit.actorRole, 64, 'Staff'),
-      action: sanitizeText(audit.action, 120, 'Clinical Event'),
-      details: sanitizeText(audit.details, 1000, 'Logged event'),
-      createdAt: serverTimestamp()
-    });
+    await enqueueFirestoreWrite(() =>
+      setDoc(doc(db, 'auditLogs', docId), {
+        id: docId,
+        ownerUid: uid,
+        encounterId: sanitizeId(audit.encounterId, 'SYSTEM'),
+        patientId: sanitizeId(audit.patientId, 'SYSTEM'),
+        eventTimestamp: sanitizeText(audit.timestamp, 64, new Date().toISOString()),
+        actor: sanitizeText(audit.actor, 120, 'Clinical Staff'),
+        actorRole: sanitizeText(audit.actorRole, 64, 'Staff'),
+        action: sanitizeText(audit.action, 120, 'Clinical Event'),
+        details: sanitizeText(audit.details, 1000, 'Logged event'),
+        createdAt: serverTimestamp()
+      })
+    );
     return true;
   } catch (error) {
+    if (isTransientOfflineError(error)) return false;
     handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
@@ -444,42 +448,62 @@ export async function deletePatientFromFirestore(
   patientId: string,
   encounterIds: string[]
 ): Promise<void> {
-  if (!isCloudAuthReady() || !auth.currentUser) return;
-  const uid = auth.currentUser.uid;
+  if (!isCloudAuthReady()) return;
+  const uid = getEffectiveCloudUid();
 
   for (const encId of encounterIds) {
-    const safeEncId = toCloudId(uid, encId, 'ENC');
-    const encPath = `encounters/${safeEncId}`;
-    try {
-      const snap = await getDoc(doc(db, 'encounters', safeEncId));
-      if (snap.exists()) {
-        await deleteDoc(doc(db, 'encounters', safeEncId));
+    if (!isCloudAuthReady()) return;
+    const candidateEncIds = Array.from(
+      new Set([sanitizeId(encId, 'ENC'), toLegacyPrefixedId(uid, encId, 'ENC')])
+    );
+    for (const targetEncId of candidateEncIds) {
+      const encPath = `encounters/${targetEncId}`;
+      try {
+        await enqueueFirestoreWrite(() => deleteDoc(doc(db, 'encounters', targetEncId)));
+      } catch (error) {
+        if (isTransientOfflineError(error)) return;
+        // Ignore if legacy prefixed variant does not exist
+        if (targetEncId === sanitizeId(encId, 'ENC')) {
+          try {
+            handleFirestoreError(error, OperationType.DELETE, encPath);
+          } catch {
+            // Continue cleanup
+          }
+        }
       }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, encPath);
     }
   }
 
-  const safePatientId = toCloudId(uid, patientId, 'PHC');
-  const patPath = `patients/${safePatientId}`;
-  try {
-    const snap = await getDoc(doc(db, 'patients', safePatientId));
-    if (snap.exists()) {
-      await deleteDoc(doc(db, 'patients', safePatientId));
+  if (!isCloudAuthReady()) return;
+  const candidatePatientIds = Array.from(
+    new Set([sanitizeId(patientId, 'PHC'), toLegacyPrefixedId(uid, patientId, 'PHC')])
+  );
+  for (const targetPatId of candidatePatientIds) {
+    const patPath = `patients/${targetPatId}`;
+    try {
+      await enqueueFirestoreWrite(() => deleteDoc(doc(db, 'patients', targetPatId)));
+    } catch (error) {
+      if (isTransientOfflineError(error)) return;
+      if (targetPatId === sanitizeId(patientId, 'PHC')) {
+        try {
+          handleFirestoreError(error, OperationType.DELETE, patPath);
+        } catch {
+          // Continue cleanup
+        }
+      }
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, patPath);
   }
 }
 
 export async function fetchOwnedCloudPatientCount(): Promise<number> {
-  if (!isCloudAuthReady() || !auth.currentUser) return 0;
-  const uid = auth.currentUser.uid;
+  if (!isCloudAuthReady()) return 0;
+  const uid = getEffectiveCloudUid();
   try {
     const q = query(collection(db, 'patients'), where('ownerUid', '==', uid));
     const snap = await getDocs(q);
     return snap.size;
   } catch (error) {
+    if (isTransientOfflineError(error)) return 0;
     handleFirestoreError(error, OperationType.LIST, 'patients');
   }
 }

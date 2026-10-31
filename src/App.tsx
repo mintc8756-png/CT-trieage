@@ -136,10 +136,11 @@ function AppShell() {
     init();
   }, [refreshState]);
 
-  // Automatically sync pending local records to Firestore when Firebase Auth becomes ready
+  // Automatically sync pending local records to Firestore when Firebase Auth or session becomes ready
   useEffect(() => {
-    const unsubscribe = subscribeToFirebaseAuth(async user => {
-      if (user && user.emailVerified && isOnline) {
+    if (!isReady || !authenticatedStaff) return;
+    const unsubscribe = subscribeToFirebaseAuth(async () => {
+      if (isOnline) {
         try {
           await repository.syncPendingEncounters();
           refreshState();
@@ -149,7 +150,7 @@ function AppShell() {
       }
     });
     return () => unsubscribe();
-  }, [isOnline, refreshState]);
+  }, [isReady, authenticatedStaff, isOnline, refreshState]);
 
   // Monitor real internet connectivity (navigator.onLine + window online/offline events + active network reachability probe)
   useEffect(() => {
@@ -157,13 +158,9 @@ function AppShell() {
 
     const applyNetworkState = async (online: boolean) => {
       if (!isMounted) return;
-      setIsOnline(prev => {
-        if (prev !== online) {
-          void setFirestoreNetworkState(online);
-        }
-        return online;
-      });
-      if (online) {
+      setIsOnline(online);
+      await setFirestoreNetworkState(online);
+      if (online && isReady && authenticatedStaff) {
         try {
           await repository.syncPendingEncounters();
           if (isMounted) refreshState();
@@ -212,7 +209,7 @@ function AppShell() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.clearInterval(intervalId);
     };
-  }, [refreshState]);
+  }, [isReady, authenticatedStaff, refreshState]);
 
   // Handle Login
   const handleAuthenticated = (staff: StaffProfile) => {
@@ -243,7 +240,6 @@ function AppShell() {
 
   // Handle Sign Out
   const handleSignOut = async () => {
-    await signOutFromFirebase();
     setAuthenticatedStaff(null);
     setSelectedPatientId(null);
     setSelectedEncounterId(null);
@@ -254,6 +250,7 @@ function AppShell() {
     } catch {
       // ignore storage errors
     }
+    await signOutFromFirebase();
   };
 
   // Select patient to view details
@@ -432,7 +429,7 @@ function AppShell() {
 
   // Handle Sync Now
   const handleSyncNow = async (): Promise<number> => {
-    const { syncedCount } = await repository.syncPendingEncounters();
+    const { syncedCount } = await repository.syncPendingEncounters(true);
     refreshState();
     return syncedCount;
   };

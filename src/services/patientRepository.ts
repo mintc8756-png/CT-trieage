@@ -22,6 +22,7 @@ import {
 } from '../utils/mockData';
 
 import {
+  getEffectiveCloudUid,
   isCloudAuthReady,
   syncPatientToFirestore,
   syncEncounterToFirestore,
@@ -42,6 +43,8 @@ export interface AppStateData {
 class PatientRepository {
   private db: IDBDatabase | null = null;
   private isInitialized = false;
+  private syncInProgress: Promise<{ syncedCount: number }> | null = null;
+  private syncedCloudUid: string | null = null;
 
   // In-memory cache for ultra-fast, synchronous reads and reliable fallback
   private patientsCache: Map<string, Patient> = new Map();
@@ -560,21 +563,32 @@ class PatientRepository {
     auditEvent: AuditEvent,
     isOnline = true
   ): Promise<void> {
-    if (isOnline && encounter.syncStatus !== 'LOCAL_ONLY') {
-      if (isCloudAuthReady()) {
-        await syncPatientToFirestore(patient);
-        await syncEncounterToFirestore(encounter);
-        await syncAuditLogToFirestore(auditEvent);
-      }
-      encounter.syncStatus = 'SYNCED';
-    } else {
-      encounter.syncStatus = 'LOCAL_ONLY';
-    }
-
+    // Store in memory cache first so any concurrent lookup sees the parent patient immediately
     this.patientsCache.set(patient.id, patient);
     this.encountersCache.set(encounter.id, encounter);
     this.assessmentsCache.set(assessment.id, assessment);
     this.auditLogsCache.unshift(auditEvent);
+
+    if (isOnline && encounter.syncStatus !== 'LOCAL_ONLY' && isCloudAuthReady()) {
+      try {
+        const patOk = await syncPatientToFirestore(patient);
+        const encOk = patOk ? await syncEncounterToFirestore(encounter) : false;
+        if (encOk) {
+          await syncAuditLogToFirestore(auditEvent);
+          encounter.syncStatus = 'SYNCED';
+        } else {
+          encounter.syncStatus = 'PENDING_SYNC';
+        }
+      } catch {
+        encounter.syncStatus = 'PENDING_SYNC';
+      }
+    } else if (isOnline) {
+      encounter.syncStatus = 'PENDING_SYNC';
+    } else {
+      encounter.syncStatus = 'LOCAL_ONLY';
+    }
+
+    this.encountersCache.set(encounter.id, encounter);
 
     await this.putToStore('patients', patient);
     await this.putToStore('encounters', encounter);
@@ -611,7 +625,11 @@ class PatientRepository {
     });
 
     if (isOnline && isCloudAuthReady()) {
-      await deletePatientFromFirestore(patientId, encounterIdsToRemove);
+      try {
+        await deletePatientFromFirestore(patientId, encounterIdsToRemove);
+      } catch {
+        // Logged by handleFirestoreError
+      }
     }
 
     // Remove from in-memory caches and IndexedDB
@@ -640,7 +658,11 @@ class PatientRepository {
     };
 
     if (isOnline && isCloudAuthReady()) {
-      await syncAuditLogToFirestore(auditEvent);
+      try {
+        await syncAuditLogToFirestore(auditEvent);
+      } catch {
+        // Logged by handleFirestoreError
+      }
     }
 
     this.auditLogsCache.unshift(auditEvent);
@@ -664,13 +686,20 @@ class PatientRepository {
     enc.assessmentHistory.push(newAssessment);
     enc.updatedAt = new Date().toISOString();
     enc.status = 'Under Clinical Review';
-    enc.syncStatus = isOnline ? 'SYNCED' : 'LOCAL_ONLY';
+    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
 
     if (isOnline && isCloudAuthReady()) {
-      const pat = this.patientsCache.get(enc.patientId);
-      if (pat) await syncPatientToFirestore(pat);
-      await syncEncounterToFirestore(enc);
-      await syncAuditLogToFirestore(auditEvent);
+      try {
+        const pat = this.patientsCache.get(enc.patientId);
+        const patOk = pat ? await syncPatientToFirestore(pat) : false;
+        const encOk = patOk ? await syncEncounterToFirestore(enc) : false;
+        if (encOk) {
+          await syncAuditLogToFirestore(auditEvent);
+          enc.syncStatus = 'SYNCED';
+        }
+      } catch {
+        enc.syncStatus = 'PENDING_SYNC';
+      }
     }
 
     this.assessmentsCache.set(newAssessment.id, newAssessment);
@@ -698,7 +727,7 @@ class PatientRepository {
     const oldStatus = enc.status;
     enc.status = newStatus;
     enc.updatedAt = new Date().toISOString();
-    enc.syncStatus = isOnline ? 'SYNCED' : 'LOCAL_ONLY';
+    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
 
     const audit: AuditEvent = {
       id: 'AUD-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
@@ -712,10 +741,17 @@ class PatientRepository {
     };
 
     if (isOnline && isCloudAuthReady()) {
-      const pat = this.patientsCache.get(enc.patientId);
-      if (pat) await syncPatientToFirestore(pat);
-      await syncEncounterToFirestore(enc);
-      await syncAuditLogToFirestore(audit);
+      try {
+        const pat = this.patientsCache.get(enc.patientId);
+        const patOk = pat ? await syncPatientToFirestore(pat) : false;
+        const encOk = patOk ? await syncEncounterToFirestore(enc) : false;
+        if (encOk) {
+          await syncAuditLogToFirestore(audit);
+          enc.syncStatus = 'SYNCED';
+        }
+      } catch {
+        enc.syncStatus = 'PENDING_SYNC';
+      }
     }
 
     this.encountersCache.set(encounterId, enc);
@@ -741,7 +777,7 @@ class PatientRepository {
     enc.priority = newPriority;
     enc.assessmentStatus = 'ASSESSED';
     enc.updatedAt = new Date().toISOString();
-    enc.syncStatus = isOnline ? 'SYNCED' : 'LOCAL_ONLY';
+    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
 
     if (currentAsm) {
       currentAsm.priority = newPriority;
@@ -771,10 +807,17 @@ class PatientRepository {
     };
 
     if (isOnline && isCloudAuthReady()) {
-      const pat = this.patientsCache.get(enc.patientId);
-      if (pat) await syncPatientToFirestore(pat);
-      await syncEncounterToFirestore(enc);
-      await syncAuditLogToFirestore(audit);
+      try {
+        const pat = this.patientsCache.get(enc.patientId);
+        const patOk = pat ? await syncPatientToFirestore(pat) : false;
+        const encOk = patOk ? await syncEncounterToFirestore(enc) : false;
+        if (encOk) {
+          await syncAuditLogToFirestore(audit);
+          enc.syncStatus = 'SYNCED';
+        }
+      } catch {
+        enc.syncStatus = 'PENDING_SYNC';
+      }
     }
 
     this.encountersCache.set(encounterId, enc);
@@ -809,7 +852,11 @@ class PatientRepository {
         details: `Receipt ${enc.receiptId} print status recorded as ${printStatus}.`
       };
       if (typeof navigator !== 'undefined' && navigator.onLine && isCloudAuthReady()) {
-        await syncAuditLogToFirestore(audit);
+        try {
+          await syncAuditLogToFirestore(audit);
+        } catch {
+          // Logged by handleFirestoreError
+        }
       }
       this.auditLogsCache.unshift(audit);
       await this.putToStore('auditLogs', audit);
@@ -838,7 +885,7 @@ class PatientRepository {
 
     enc.status = 'Under Clinical Review';
     enc.updatedAt = new Date().toISOString();
-    enc.syncStatus = isOnline ? 'SYNCED' : 'LOCAL_ONLY';
+    enc.syncStatus = isOnline ? 'PENDING_SYNC' : 'LOCAL_ONLY';
 
     const audit: AuditEvent = {
       id: 'AUD-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
@@ -852,10 +899,17 @@ class PatientRepository {
     };
 
     if (isOnline && isCloudAuthReady()) {
-      const pat = this.patientsCache.get(enc.patientId);
-      if (pat) await syncPatientToFirestore(pat);
-      await syncEncounterToFirestore(enc);
-      await syncAuditLogToFirestore(audit);
+      try {
+        const pat = this.patientsCache.get(enc.patientId);
+        const patOk = pat ? await syncPatientToFirestore(pat) : false;
+        const encOk = patOk ? await syncEncounterToFirestore(enc) : false;
+        if (encOk) {
+          await syncAuditLogToFirestore(audit);
+          enc.syncStatus = 'SYNCED';
+        }
+      } catch {
+        enc.syncStatus = 'PENDING_SYNC';
+      }
     }
 
     this.assessmentsCache.set(asm.id, asm);
@@ -868,39 +922,112 @@ class PatientRepository {
     this.persistFallback();
   }
 
-  public async syncPendingEncounters(): Promise<{ syncedCount: number }> {
+  public async syncPendingEncounters(forceFullSync = false): Promise<{ syncedCount: number }> {
+    if (this.syncInProgress) {
+      return this.syncInProgress;
+    }
+
+    this.syncInProgress = this.runSyncPendingEncounters(forceFullSync).finally(() => {
+      this.syncInProgress = null;
+    });
+
+    return this.syncInProgress;
+  }
+
+  private async runSyncPendingEncounters(forceFullSync = false): Promise<{ syncedCount: number }> {
+    await this.init();
+    if (!isCloudAuthReady()) {
+      return { syncedCount: 0 };
+    }
+
     let count = 0;
     const encounters = Array.from(this.encountersCache.values());
+    const currentUid = getEffectiveCloudUid();
+    const needsInitialCloudSeed = Boolean(
+      forceFullSync || this.syncedCloudUid !== currentUid
+    );
+    const syncedPatientIds = new Set<string>();
+    let allCloudWritesSucceeded = true;
 
-    if (isCloudAuthReady()) {
-      // Push all local patients first so relational checks in Firestore rules pass
+    if (needsInitialCloudSeed) {
       const patients = Array.from(this.patientsCache.values());
       for (const pat of patients) {
-        await syncPatientToFirestore(pat);
+        if (!isCloudAuthReady()) {
+          return { syncedCount: count };
+        }
+        try {
+          const ok = await syncPatientToFirestore(pat);
+          if (ok) {
+            syncedPatientIds.add(pat.id);
+          } else {
+            allCloudWritesSucceeded = false;
+          }
+        } catch {
+          allCloudWritesSucceeded = false;
+        }
       }
     }
 
     for (const enc of encounters) {
-      if (
+      const isPending =
         enc.syncStatus === 'LOCAL_ONLY' ||
         enc.syncStatus === 'PENDING_SYNC' ||
         enc.syncStatus === 'Saved Locally' ||
         enc.syncStatus === 'Pending Sync' ||
-        enc.syncStatus === 'SYNC_FAILED' ||
-        isCloudAuthReady()
-      ) {
+        enc.syncStatus === 'SYNC_FAILED';
+
+      if (isPending || needsInitialCloudSeed) {
         const wasPending = enc.syncStatus !== 'SYNCED' && enc.syncStatus !== 'Synced';
-        if (isCloudAuthReady()) {
-          await syncEncounterToFirestore(enc);
+
+        if (!syncedPatientIds.has(enc.patientId)) {
+          const pat = this.patientsCache.get(enc.patientId);
+          if (pat) {
+            try {
+              const patOk = await syncPatientToFirestore(pat);
+              if (patOk) {
+                syncedPatientIds.add(pat.id);
+              } else {
+                allCloudWritesSucceeded = false;
+                enc.syncStatus = 'PENDING_SYNC';
+                await this.putToStore('encounters', enc);
+                continue;
+              }
+            } catch {
+              allCloudWritesSucceeded = false;
+              enc.syncStatus = 'PENDING_SYNC';
+              await this.putToStore('encounters', enc);
+              continue;
+            }
+          }
         }
+
+        let encOk = false;
+        try {
+          encOk = await syncEncounterToFirestore(enc);
+        } catch {
+          encOk = false;
+        }
+        if (!encOk) {
+          allCloudWritesSucceeded = false;
+          enc.syncStatus = 'PENDING_SYNC';
+          await this.putToStore('encounters', enc);
+          continue;
+        }
+
         // Preserve original arrival, registration, and receipt metadata while marking SYNCED
         enc.syncStatus = 'SYNCED';
-        if (wasPending) {
-          enc.updatedAt = new Date().toISOString();
+        if (wasPending || forceFullSync) {
+          if (wasPending) {
+            enc.updatedAt = new Date().toISOString();
+          }
           await this.putToStore('encounters', enc);
           count++;
         }
       }
+    }
+
+    if (allCloudWritesSucceeded && isCloudAuthReady()) {
+      this.syncedCloudUid = currentUid;
     }
 
     if (count > 0) {
@@ -912,10 +1039,14 @@ class PatientRepository {
         actor: 'Background Sync Worker',
         actorRole: 'System',
         action: 'Cloud Synchronization Successful',
-        details: `Reconciled ${count} offline pending health record(s) to central Firestore registry using stable encounter and receipt IDs.`
+        details: `Reconciled ${count} health record(s) to central Firestore registry using stable encounter and receipt IDs.`
       };
       if (isCloudAuthReady()) {
-        await syncAuditLogToFirestore(audit);
+        try {
+          await syncAuditLogToFirestore(audit);
+        } catch {
+          // Logged by handleFirestoreError
+        }
       }
       this.auditLogsCache.unshift(audit);
       await this.putToStore('auditLogs', audit);
@@ -936,6 +1067,7 @@ class PatientRepository {
       }
     }
     localStorage.removeItem('ai_triage_fallback_data');
+    this.syncedCloudUid = null;
     this.patientsCache.clear();
     this.encountersCache.clear();
     this.assessmentsCache.clear();

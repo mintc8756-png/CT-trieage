@@ -23,64 +23,6 @@ interface PatientReceiptModalProps {
   onUpdatePrintStatus: (encounterId: string, status: ReceiptPrintStatus) => Promise<void>;
 }
 
-/**
- * Generates a deterministic, local 21x21 QR-like SVG matrix encoding only
- * non-sensitive identifiers: { app: "XOR-TRIAGE", receiptId, patientId, encounterId }.
- * Works 100% offline with zero external libraries or network calls.
- */
-function generateVerificationMatrix(payload: string): boolean[][] {
-  const size = 21;
-  const grid: boolean[][] = Array.from({ length: size }, () => Array(size).fill(false));
-
-  const drawFinder = (r0: number, c0: number) => {
-    for (let r = 0; r < 7; r++) {
-      for (let c = 0; c < 7; c++) {
-        const isBorder = r === 0 || r === 6 || c === 0 || c === 6;
-        const isInner = r >= 2 && r <= 4 && c >= 2 && c <= 4;
-        grid[r0 + r][c0 + c] = isBorder || isInner;
-      }
-    }
-  };
-
-  drawFinder(0, 0);
-  drawFinder(0, size - 7);
-  drawFinder(size - 7, 0);
-
-  // Timing patterns
-  for (let i = 8; i < size - 8; i++) {
-    grid[6][i] = i % 2 === 0;
-    grid[i][6] = i % 2 === 0;
-  }
-
-  // Deterministic hash stream from non-sensitive identifier payload
-  let hash = 2166136261;
-  for (let i = 0; i < payload.length; i++) {
-    hash ^= payload.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  let seed = hash >>> 0;
-  const nextBit = () => {
-    seed ^= seed << 13;
-    seed ^= seed >>> 17;
-    seed ^= seed << 5;
-    return ((seed >>> 0) & 1) === 1;
-  };
-
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      const inTopLeft = r < 8 && c < 8;
-      const inTopRight = r < 8 && c >= size - 8;
-      const inBottomLeft = r >= size - 8 && c < 8;
-      const onTiming = r === 6 || c === 6;
-      if (!inTopLeft && !inTopRight && !inBottomLeft && !onTiming) {
-        grid[r][c] = nextBit();
-      }
-    }
-  }
-
-  return grid;
-}
 
 export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
   patient,
@@ -106,19 +48,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
     [encounter.vitalSigns]
   );
 
-  // Non-sensitive verification payload for local QR code
-  const qrPayload = useMemo(
-    () =>
-      JSON.stringify({
-        app: 'XOR-TRIAGE',
-        receiptId: encounter.receiptId,
-        patientId: patient.id,
-        encounterId: encounter.id
-      }),
-    [encounter.receiptId, patient.id, encounter.id]
-  );
-
-  const qrMatrix = useMemo(() => generateVerificationMatrix(qrPayload), [qrPayload]);
 
   // Listen to browser print lifecycle events
   useEffect(() => {
@@ -164,7 +93,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
     val: string | number | null,
     isUnavail: boolean,
     unit: string,
-    refRange: string,
     statusObj?: { status: string }
   ) => {
     const recordedValue =
@@ -178,7 +106,7 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
         ? t('patientDetail.statusUnavailable')
         : t('patientDetail.statusNormal');
 
-    return { label, recordedValue, unit: isUnavail || val === null ? '—' : unit, refRange, flagText };
+    return { label, recordedValue, unit: isUnavail || val === null ? '—' : unit, flagText };
   };
 
   const vitalRows = [
@@ -189,7 +117,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
         : `${vs.systolicBP.value}/${vs.diastolicBP.value ?? '—'}`,
       vs.systolicBP.isUnavailable || vs.systolicBP.value === null,
       'mmHg',
-      '100–139 / 60–89',
       vitalStatuses.find(v => v.name === 'Blood Pressure')
     ),
     formatVitalRow(
@@ -197,7 +124,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
       vs.oxygenSaturation.value,
       vs.oxygenSaturation.isUnavailable,
       '%',
-      '95–100',
       vitalStatuses.find(v => v.name === 'Oxygen Saturation (SpO₂)')
     ),
     formatVitalRow(
@@ -205,7 +131,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
       vs.pulseRate.value,
       vs.pulseRate.isUnavailable,
       'bpm',
-      '60–100',
       vitalStatuses.find(v => v.name === 'Pulse Rate')
     ),
     formatVitalRow(
@@ -213,7 +138,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
       vs.respiratoryRate.value,
       vs.respiratoryRate.isUnavailable,
       'breaths/min',
-      '12–20',
       vitalStatuses.find(v => v.name === 'Respiratory Rate')
     ),
     formatVitalRow(
@@ -221,7 +145,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
       vs.temperature.value,
       vs.temperature.isUnavailable,
       '°F',
-      '97.7–99.5',
       vitalStatuses.find(v => v.name === 'Body Temperature')
     )
   ];
@@ -437,9 +360,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
                 {t('receipt.sectionCTitle')}
               </div>
               <div className="grid grid-cols-3 gap-x-2 gap-y-0.5">
-                <span className="font-semibold text-black">{t('receipt.encounterId')}</span>
-                <span className="col-span-2 font-mono font-bold text-black">{encounter.id}</span>
-
                 <span className="font-semibold text-black">{t('receipt.arrivalTime')}</span>
                 <span className="col-span-2 font-mono text-black">
                   {new Date(encounter.arrivalTimestamp || encounter.createdAt).toLocaleString()}
@@ -532,9 +452,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
                   <th className="py-1 px-2 border-r border-black font-bold text-black">
                     {t('receipt.colUnit')}
                   </th>
-                  <th className="py-1 px-2 border-r border-black font-bold text-black">
-                    {t('receipt.colReference')}
-                  </th>
                   <th className="py-1 px-2 font-bold text-black">
                     {t('receipt.colFlag')}
                   </th>
@@ -551,9 +468,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
                     </td>
                     <td className="py-1 px-2 border-r border-black font-mono text-black">
                       {row.unit}
-                    </td>
-                    <td className="py-1 px-2 border-r border-black font-mono text-black">
-                      {row.refRange}
                     </td>
                     <td className="py-1 px-2 font-mono font-bold text-black">
                       {row.flagText}
@@ -673,7 +587,7 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
             </div>
           </div>
 
-          {/* SECTION H — RECEIPT IDENTIFICATION, LOCAL QR & MANDATORY DISCLAIMER */}
+          {/* SECTION H — RECEIPT IDENTIFICATION & MANDATORY DISCLAIMER */}
           <div className="border-t-2 border-black pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[10px] text-black print-avoid-break">
             <div className="space-y-1 flex-1">
               <div className="font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5">
@@ -682,9 +596,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
                 </span>
                 <span>
                   <strong>Patient ID:</strong> {patient.id}
-                </span>
-                <span>
-                  <strong>Encounter:</strong> {encounter.id}
                 </span>
                 <span>
                   <strong>XOR Triage:</strong> {t('app.version')}
@@ -696,35 +607,6 @@ export const PatientReceiptModal: React.FC<PatientReceiptModalProps> = ({
               <p className="font-semibold italic text-black">
                 {RECEIPT_DISCLAIMER}
               </p>
-            </div>
-
-            {/* Deterministic Offline SVG QR Code (Identifiers Only) */}
-            <div className="flex flex-col items-center shrink-0 border border-black p-1 bg-white">
-              <svg
-                width="54"
-                height="54"
-                viewBox="0 0 21 21"
-                shapeRendering="crispEdges"
-                aria-label="Receipt Verification QR"
-              >
-                {qrMatrix.map((row, rIdx) =>
-                  row.map((cell, cIdx) =>
-                    cell ? (
-                      <rect
-                        key={`${rIdx}-${cIdx}`}
-                        x={cIdx}
-                        y={rIdx}
-                        width={1}
-                        height={1}
-                        fill="#000000"
-                      />
-                    ) : null
-                  )
-                )}
-              </svg>
-              <span className="font-mono text-[8px] mt-0.5 uppercase tracking-tighter text-black">
-                {encounter.receiptId}
-              </span>
             </div>
           </div>
         </div>
